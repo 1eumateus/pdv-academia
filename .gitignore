@@ -1,0 +1,7 @@
+build/bin
+frontend/dist
+frontend/node_modules
+.env
+
+# Planilhas com dados pessoais de clientes (importação da academia): nunca versionar.
+dados/

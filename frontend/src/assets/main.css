@@ -1,0 +1,398 @@
+/* Caminho: pdv/frontend/src/assets/main.css */
+
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #f8f9fb;
+  --border: #dde1e7;
+  --text: #1d2430;
+  --muted: #5d6878;
+  --primary: #1f5fbf;
+  --primary-dark: #174a96;
+  --primary-soft: #e6eefb;
+  --success: #1c7c45;
+  --success-soft: #e3f4ea;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  --warning: #9a6200;
+  --warning-soft: #fff4dc;
+  --sidebar: #1b2433;
+  --sidebar-text: #c9d2df;
+  --field-bg: #fff;
+  --field-border: #c4cbd5;
+  --row-hover: #fafbfd;
+  --success-hover: #155f35;
+  --ok-border: #b9e2c9;
+  --bad-border: #f5c2bd;
+  --warn-border: #f1d9a6;
+  --info-border: #c3d6f5;
+  --warning-text: #6b4500;
+  --info-text: #1b437f;
+  --tint: rgba(0, 0, 0, 0.08);
+  --radius: 8px;
+  --shadow: 0 1px 3px rgba(16, 24, 40, 0.08);
+  font-family: 'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* Tema escuro: só na tela; a impressão continua clara (papel). */
+@media screen {
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+    --bg: #12161d;
+    --surface: #1b212b;
+    --surface-2: #212834;
+    --border: #323b49;
+    --text: #e4e8ef;
+    --muted: #9aa5b5;
+    --primary: #3f7fe0;
+    --primary-dark: #336cc4;
+    --primary-soft: #1c2b44;
+    --success: #34a065;
+    --success-soft: #16301f;
+    --danger: #f0705f;
+    --danger-soft: #3a1d1a;
+    --warning: #e0a537;
+    --warning-soft: #352a12;
+    --sidebar: #0d1117;
+    --sidebar-text: #b4bfcf;
+    --field-bg: #151a22;
+    --field-border: #3a4454;
+    --row-hover: #222a36;
+    --success-hover: #2b8a55;
+    --ok-border: #24553a;
+    --bad-border: #6b2c25;
+    --warn-border: #6b5320;
+    --info-border: #2b4a78;
+    --warning-text: #f0c060;
+    --info-text: #a9c8f5;
+    --tint: rgba(255, 255, 255, 0.1);
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body { background: var(--bg); }
+
+h1, h2, h3 { margin: 0 0 12px; line-height: 1.25; }
+h1 { font-size: 22px; }
+h2 { font-size: 18px; }
+h3 { font-size: 15px; }
+p { margin: 0 0 8px; }
+
+a { color: var(--primary); }
+
+:focus-visible { outline: 3px solid #7aa7ec; outline-offset: 2px; }
+
+/* ---------- Layout ---------- */
+.layout { display: flex; flex-direction: column; height: 100%; }
+/* Barra do topo: marca, menu principal, situação do caixa e menu do usuário. */
+.appbar {
+  display: flex; align-items: center; gap: 14px; flex-shrink: 0; padding: 8px 20px;
+  background: var(--sidebar); color: var(--sidebar-text);
+}
+.appbar .brand { color: #fff; font-weight: 700; font-size: 17px; line-height: 1.1; margin-right: 6px; }
+.appbar .brand small { display: block; font-weight: 400; font-size: 11px; color: var(--sidebar-text); }
+.appbar nav { display: flex; gap: 2px; flex-wrap: wrap; }
+.appbar nav a { display: flex; align-items: center; gap: 7px; color: var(--sidebar-text); text-decoration: none; padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
+.appbar nav a:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+/* Cada grupo com a sua cor (--ic); no item ativo o ícone fica branco. */
+.appbar nav a svg { color: var(--ic, currentColor); flex-shrink: 0; }
+.appbar nav a.router-link-active svg { color: #fff; }
+.appbar nav a.router-link-active { background: var(--primary); color: #fff; font-weight: 600; }
+.appbar .kbd { font-size: 10px; opacity: 0.7; margin-left: 5px; }
+.user-menu { position: relative; }
+.user-btn { background: transparent; border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; min-height: 0; padding: 6px 10px; }
+.user-btn small { color: var(--sidebar-text); }
+.user-btn:hover:not(:disabled), .user-btn[aria-expanded='true'] { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.user-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 60; min-width: 180px; display: flex; flex-direction: column;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 4px;
+}
+.user-pop button { background: transparent; border: 0; text-align: left; justify-content: flex-start; min-height: 0; padding: 8px 10px; }
+.user-pop button:hover { background: var(--primary-soft); }
+
+.main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.content { flex: 1; overflow: auto; padding: 20px 24px 32px; }
+
+/* ---------- Componentes ---------- */
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 16px;
+}
+.card + .card { margin-top: 16px; }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) {
+  .split, .grid-3, .grid-4 { grid-template-columns: minmax(0, 1fr); }
+  .grid-2 { grid-template-columns: minmax(0, 1fr); }
+}
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row.end { justify-content: flex-end; }
+.row.between { justify-content: space-between; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.spacer { flex: 1; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.right { text-align: right; }
+.nowrap { white-space: nowrap; }
+.mono { font-variant-numeric: tabular-nums; }
+
+label.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+label.check { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+input, select, textarea {
+  font: inherit; color: var(--text); background: var(--field-bg); border: 1px solid var(--field-border); border-radius: 6px;
+  padding: 8px 10px; min-height: 38px; width: 100%;
+}
+input[type='checkbox'] { width: auto; min-height: auto; }
+textarea { min-height: 70px; resize: vertical; }
+input:focus, select:focus, textarea:focus { border-color: var(--primary); }
+input.big { font-size: 18px; padding: 10px 12px; }
+input[aria-invalid='true'] { border-color: var(--danger); background: var(--danger-soft); }
+
+button, .btn {
+  font: inherit; font-weight: 600; border-radius: 6px; padding: 8px 14px; min-height: 38px; cursor: pointer;
+  border: 1px solid var(--field-border); background: var(--surface); color: var(--text); display: inline-flex; align-items: center; gap: 6px;
+  justify-content: center;
+}
+button:hover:not(:disabled) { background: var(--surface-2); }
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+button.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+button.primary:hover:not(:disabled) { background: var(--primary-dark); }
+button.success { background: var(--success); border-color: var(--success); color: #fff; }
+button.success:hover:not(:disabled) { background: var(--success-hover); }
+button.danger { background: var(--surface); border-color: var(--danger); color: var(--danger); }
+button.danger:hover:not(:disabled) { background: var(--danger-soft); }
+button.link { border: none; background: none; color: var(--primary); padding: 4px 6px; min-height: auto; }
+button.big { font-size: 17px; padding: 12px 18px; min-height: 48px; }
+button.block { width: 100%; }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+/* Conteúdo de todas as colunas centralizado (inclusive as marcadas como .right). */
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: center; vertical-align: middle; }
+th.right, td.right { text-align: center; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); background: var(--surface-2); }
+tbody tr:hover { background: var(--row-hover); }
+tr.selected { background: var(--primary-soft) !important; }
+tr.inactive td { color: var(--muted); }
+/* Orçamentos: situação pela cor da linha. */
+tr.q-convertido td { background: var(--success-soft); }
+tr.q-pendente td { background: var(--warning-soft); }
+tr.q-vencido td { background: var(--danger-soft); }
+.table-wrap { overflow-x: auto; }
+
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--surface-2); border: 1px solid var(--border); }
+.badge.ok { background: var(--success-soft); color: var(--success); border-color: var(--ok-border); }
+.badge.bad { background: var(--danger-soft); color: var(--danger); border-color: var(--bad-border); }
+.badge.warn { background: var(--warning-soft); color: var(--warning); border-color: var(--warn-border); }
+
+.alert { padding: 10px 14px; border-radius: 6px; border: 1px solid; font-size: 14px; }
+.alert.error { background: var(--danger-soft); border-color: var(--bad-border); color: var(--danger); }
+.alert.warn { background: var(--warning-soft); border-color: var(--warn-border); color: var(--warning-text); }
+.alert.info { background: var(--primary-soft); border-color: var(--info-border); color: var(--info-text); }
+.alert.success { background: var(--success-soft); border-color: var(--ok-border); color: var(--success); }
+
+.state { padding: 28px 12px; text-align: center; color: var(--muted); }
+
+.total-box { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+.total-box .line { display: flex; justify-content: space-between; padding: 3px 0; }
+.total-box .grand { font-size: 26px; font-weight: 700; border-top: 1px solid var(--border); margin-top: 6px; padding-top: 8px; }
+
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.stat .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.stat .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+
+.pay-options { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.pay-options button { padding: 8px 4px; }
+.disc-input { width: 78px; min-height: 32px; padding: 4px 6px; text-align: center; }
+.disc-input.bad { border-color: var(--danger); background: var(--danger-soft); }
+/* Vendas: a tela cabe na janela; o carrinho rola por dentro e a página não. */
+/* Tela de vendas: cabe na janela; só o carrinho (e a lista de produtos) rolam por dentro. */
+.content.fill { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 16px; }
+.content.fill > .sale-page { flex: 1; }
+.sale-page { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.sale-grid { flex: 1; min-height: 0; display: grid; gap: 14px; grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.25fr) minmax(370px, 1fr); }
+.sale-pay .row > .big { white-space: nowrap; min-width: 0; padding-left: 10px; padding-right: 10px; overflow: hidden; text-overflow: ellipsis; }
+.sale-grid > .card { margin-top: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.sale-catalog { overflow: hidden; }
+@media (max-width: 1100px) { .content.fill { overflow: auto; } .sale-grid { grid-template-columns: minmax(0, 1fr); } .sale-catalog { height: 360px; } }
+.sale-split { flex: 1; min-height: 0; align-items: stretch; }
+.sale-cart { min-height: 0; overflow: hidden; }
+.sale-items { flex: 1; min-height: 0; overflow: auto; }
+.sale-pay { gap: 10px; min-height: 0; overflow: hidden; }
+.sale-items tr.selected td { background: var(--primary-soft); }
+/* Remover fica preso à direita: com o carrinho estreito a tabela rola, mas o botão não some. */
+.sale-items th:last-child, .sale-items td:last-child { position: sticky; right: 0; z-index: 1; background: var(--surface); }
+.sale-items tr.selected td:last-child { background: linear-gradient(var(--primary-soft), var(--primary-soft)), var(--surface); }
+.shortcuts { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+kbd { font-family: inherit; font-size: 12px; padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 4px; background: var(--surface); color: var(--text); white-space: nowrap; }
+/* Botões de finalizar/orçamento sempre no rodapé da coluna; só o conteúdo de cima rola. */
+.pay-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; gap: 10px; padding-right: 2px; }
+.pay-actions { flex: none; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
+.sale-pay .total-box { padding: 8px 12px; }
+.sale-pay .total-box .grand { font-size: 26px; margin-top: 2px; padding-top: 4px; }
+.total-box.solo .grand { border-top: 0; margin-top: 0; padding-top: 0; }
+/* Caixas de digitar da coluna de pagamento, todas do mesmo tamanho (inclusive a busca do cliente). */
+.sale-pay input.big, .sale-pay input[type='search'] { font-size: 20px; padding: 10px 12px; }
+.pay-options button[aria-pressed='true'] { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+.tabs button { border: none; border-bottom: 3px solid transparent; border-radius: 0; background: none; }
+.tabs button[aria-selected='true'] { border-bottom-color: var(--primary); color: var(--primary); }
+
+.qty-input { width: 76px; text-align: center; }
+
+/* ---------- Modal e toasts ---------- */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); display: flex; align-items: center;
+  justify-content: center; z-index: 50; padding: 16px;
+}
+.modal {
+  background: var(--surface); border-radius: 10px; width: 100%; max-width: 520px; max-height: 90vh;
+  overflow: auto; padding: 20px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.modal.wide { max-width: 760px; }
+.modal.full { max-width: min(1180px, 96vw); }
+.modal footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 60; max-width: 420px; }
+.toast { padding: 12px 14px; border-radius: 8px; color: #fff; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2); display: flex; gap: 10px; align-items: start; }
+.toast.success { background: var(--success); }
+.toast.error { background: var(--danger); }
+.toast.info { background: #334155; }
+.toast button { background: none; border: none; color: #fff; min-height: auto; padding: 0 4px; }
+
+tr.clickable { cursor: pointer; }
+.actions-cell { max-width: 240px; white-space: normal; }
+th.center, td.center { text-align: center; }
+th.left, td.left { text-align: left; }
+fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
+/* Produtos: todos os títulos das colunas centralizados. */
+.products-table thead th:not(.left) { text-align: center; }
+.col-price { width: 120px; }
+.price-head { position: relative; display: inline-block; cursor: pointer; }
+.price-head { line-height: 16px; }
+.price-head input { position: absolute; left: 100%; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; margin: 0 0 0 6px; padding: 0; }
+.col-money { width: 95px; }
+.col-stock { width: 70px; }
+.product-cell { min-width: 220px; white-space: normal; overflow-wrap: anywhere; }
+.product-name { font-weight: 600; }
+.product-meta { margin-top: 2px; font-size: 12px; color: var(--muted); }
+/* Tela de produtos: busca larga, botões secundários discretos, ações numa linha só. */
+.products-toolbar { flex-wrap: nowrap; }
+.products-toolbar > * { flex-shrink: 0; white-space: nowrap; }
+.products-toolbar > .products-search { flex: 3 1 140px; min-width: 120px; max-width: 360px; }
+.products-toolbar > select { flex-shrink: 1; min-width: 110px; }
+.products-toolbar > .sort-select { width: 215px; max-width: none; flex-shrink: 0; }
+.products-toolbar > .spacer { flex-shrink: 1; }
+button.ghost { background: transparent; border-color: transparent; color: var(--text, inherit); padding-left: 8px; padding-right: 8px; }
+button.ghost:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border); }
+.products-table td { padding-top: 10px; padding-bottom: 10px; }
+.products-actions { width: 1%; max-width: none; white-space: nowrap; }
+/* Alerta de estoque: linha colorida (acabou = vermelho, pouco = amarelo) e faixa forte à esquerda. */
+.products-table tr.stock-zerado td:first-child { box-shadow: inset 3px 0 var(--danger); }
+.products-table tr.stock-baixo td:first-child { box-shadow: inset 3px 0 var(--warning); }
+.quick-price { display: block; width: 96px; min-height: 32px; margin: 0 auto; padding: 4px 8px; text-align: center; }
+.quick-price.no-price { border-color: var(--danger); background: var(--danger-soft); }
+/* Conferência da NF-e: tudo alinhado pelo topo, para Nome, Código e Preço ficarem na mesma altura. */
+.nfe-table td { vertical-align: top; }
+.nfe-table td.mid { vertical-align: middle; }
+label.price-later { display: flex; align-items: flex-start; gap: 10px; margin-top: 8px; cursor: pointer; font-size: 14px; }
+label.price-later input { margin-top: 3px; width: 18px; height: 18px; }
+.actions-cell button.link { padding: 2px 5px; }
+.actions-cell { white-space: nowrap; }
+/* Telas da academia: as ações quebram em mais de uma linha em vez de criar rolagem lateral. */
+.actions-cell.wrap { white-space: normal; min-width: 120px; }
+/* Ações de tabela: ícone com legenda pequena embaixo (padrão do sistema). Sem <span>, só o ícone. */
+button.icon-btn { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-width: 50px; padding: 3px 4px; border-radius: 6px; vertical-align: middle; }
+button.icon-btn span { font-size: 10.5px; line-height: 1.1; }
+button.icon-btn:hover:not(:disabled) { background: var(--primary-soft, rgba(0, 0, 0, 0.06)); }
+tr.clickable:hover td { background: var(--primary-soft); }
+/* Nome do produto nos resultados da busca: maior e em caixa alta (só na exibição). */
+.result-name { text-align: left; font-size: 17px; font-weight: 700; text-transform: uppercase; }
+
+.login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; background: var(--bg); }
+.login-card { width: 100%; max-width: 380px; }
+.center { text-align: center; }
+
+/* ---------- Comprovante ---------- */
+.receipt { font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; max-width: 340px; margin: 0 auto; color: #000; background: #fff; overflow-wrap: anywhere; }
+.receipt.paper-58 { max-width: 250px; font-size: 12px; }
+.receipt.paper-a4 { max-width: 600px; font-size: 14px; }
+.receipt .center { text-align: center; }
+.receipt .bold { font-weight: 700; }
+.receipt .pair { display: flex; justify-content: space-between; gap: 8px; }
+.receipt .pair span:last-child { text-align: right; white-space: nowrap; }
+/* Item numa linha só: produto (cortado com …), qtd, preço e total. */
+.receipt .item-row { display: grid; grid-template-columns: minmax(0, 1fr) 3ch 8ch 9ch; gap: 6px; }
+.receipt .item-row span { text-align: right; white-space: nowrap; }
+.receipt .item-row .item-name { text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.receipt hr { border: none; border-top: 1px dashed #000; margin: 6px 0; }
+.receipt .signature { text-align: center; margin-top: 28px; }
+.receipt .signature .line { border-top: 1px solid #000; margin: 0 12px 2px; }
+.receipt-logo { max-width: 60%; max-height: 90px; margin-bottom: 6px; }
+
+/* Orçamento A4 (QuoteA4.vue): página nomeada, não afeta a térmica. */
+@page a4 { size: A4; margin: 12mm; }
+
+@media print {
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+  .modal-backdrop { background: none; position: static; }
+  .modal { box-shadow: none; max-height: none; }
+  .no-print { display: none !important; }
+}
+
+/* Pix: valor, QR e copia e cola centralizados. */
+.pix-amount { font-size: 28px; font-weight: 800; align-self: center; }
+.pix-qr { display: block; width: 260px; height: 260px; margin: 0 auto; align-self: center; image-rendering: pixelated; }
+.pix-payload { width: 100%; min-height: 70px; word-break: break-all; }
+
+/* Chips de filtro rápido (uma opção por vez, com contagem). */
+.chips { gap: 6px; }
+button.chip { min-height: auto; padding: 4px 10px; border-radius: 999px; font-size: 13px; background: var(--surface); }
+button.chip[aria-pressed='true'] { background: var(--primary); border-color: var(--primary); color: #fff; }
+.chip-count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border-radius: 999px; background: var(--tint); font-size: 11px; text-align: center; }
+button.chip[aria-pressed='true'] .chip-count { background: rgba(255, 255, 255, 0.25); }
+
+/* Linhas de produto com estoque zerado/baixo (Produtos e Relatórios). */
+tr.stock-zerado td { background: var(--danger-soft); }
+tr.stock-baixo td { background: var(--warning-soft); }
+
+/* Abas das telas de cada seção, no estilo das abas do navegador. */
+/* Abas de cada grupo: mesmo jeito do menu do topo (ícone na cor do grupo; a ativa cheia). */
+.page-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: -4px 0 16px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.page-tabs a { display: flex; align-items: center; gap: 7px; padding: 7px 14px; border-radius: 6px; color: var(--muted);
+  font-weight: 600; font-size: 14px; text-decoration: none; white-space: nowrap; }
+.page-tabs a svg { color: var(--ic, currentColor); flex-shrink: 0; }
+.page-tabs a:hover:not(.active) { background: var(--primary-soft); color: var(--text); }
+.page-tabs a.active { background: var(--primary); color: #fff; }
+.page-tabs a.active svg { color: #fff; }
+
+/* Carrinho compacto na tela de vendas (3 colunas). */
+.sale-cart .qty-input { width: 52px; }
+.sale-cart .disc-input { width: 66px; }
+.sale-cart th, .sale-cart td { padding-left: 6px; padding-right: 6px; }
+
+/* Tela de pagamento da venda. */
+/* Finalizar venda: uma coluna, total em destaque no topo. */
+.checkout { display: flex; flex-direction: column; gap: 16px; }
+.checkout-pay, .checkout-side { gap: 12px; min-width: 0; }
+.checkout-side { padding-top: 14px; border-top: 1px dashed var(--border); }
+.checkout-total { display: flex; flex-direction: column; align-items: center; padding: 14px; border-radius: var(--radius); background: var(--primary-soft); border: 1px solid var(--border); }
+.checkout-total > span { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.checkout-total > strong { font-size: 48px; line-height: 1.1; }
+.checkout input.big, .checkout input[type='search'] { font-size: 20px; padding: 10px 12px; }
+
+/* Venda para entrega (resumo da venda). */
+.delivery-toggle { font-size: 15px; font-weight: 600; }
+.delivery { gap: 8px; padding: 10px; border: 1px dashed var(--primary); border-radius: var(--radius); background: var(--primary-soft); }
+.delivery textarea { min-height: 70px; resize: vertical; }
