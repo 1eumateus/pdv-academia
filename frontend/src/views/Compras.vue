@@ -13,6 +13,8 @@ import { centsToInput, formatDate, formatDateTime, money, parseMoney, parseQty, 
 import { can } from '../composables/session'
 import { useToast } from '../composables/toast'
 import { models, type Product, type Supplier } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 const toast = useToast()
 const start = ref(today(-30))
@@ -170,6 +172,8 @@ async function save() {
     form.busy = false
   }
 }
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgCompras = usePaged(() => purchases.value, [term, start, end])
 </script>
 
 <template>
@@ -216,7 +220,7 @@ async function save() {
       <table class="left-table">
         <thead><tr><th>Entrada</th><th>Registrada em</th><th>Fornecedor</th><th>Nota</th><th class="num">Total</th><th>Por</th></tr></thead>
         <tbody>
-          <tr v-for="p in purchases" :key="p.id" class="clickable" :class="{ inactive: p.cancelledAt }" @click="openDetail(p.id)">
+          <tr v-for="p in pgCompras.visible" :key="p.id" class="clickable" :class="{ inactive: p.cancelledAt }" @click="openDetail(p.id)">
             <td><button class="link mono"><strong>nº {{ p.id }}</strong></button></td>
             <td class="nowrap muted">{{ formatDateTime(p.createdAt) }}</td>
             <td><div class="sup"><span class="kpi-ic solid" style="--c: #06b6d4; width: 30px; height: 30px"><Icon name="t-fornecedor" :size="15" /></span>{{ p.supplierName }}</div></td>
@@ -229,6 +233,7 @@ async function save() {
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgCompras" />
     </div>
   </section>
 

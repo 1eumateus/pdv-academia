@@ -9,6 +9,7 @@ import ToastHost from './components/ToastHost.vue'
 import AccessToast from './components/AccessToast.vue'
 import Icon from './components/Icon.vue'
 import SupportCard from './components/SupportCard.vue'
+import CommandBar from './components/CommandBar.vue'
 import { cashOpen, licenseStatus, refreshCash, refreshLicense, refreshSettings, settings, storeName } from './composables/cashState'
 import { backgrounds, bgStyle, refreshBackgrounds } from './composables/background'
 import { can, currentUser, logout, refreshSession, roleLabels, session } from './composables/session'
@@ -76,6 +77,8 @@ function isActive(to: string) {
   const [path, query = ''] = to.split('?')
   return path === route.path && (new URLSearchParams(query).get('modo') ?? '') === ((route.query.modo as string) ?? '')
 }
+// Telas do menu, para a busca universal (Ctrl+K) achar pelo nome.
+const pages = computed(() => groups.value.flatMap((g) => g.tabs.map((t) => ({ label: t.label, to: t.to, icon: t.icon, group: g.label }))))
 const currentGroup = computed(() => groups.value.find((g) => g.tabs.some((t) => t.to.split('?')[0] === route.path)))
 
 // Menu do usuário (canto direito do topo): fecha ao clicar em qualquer lugar.
@@ -227,6 +230,7 @@ async function savePassword() {
         </div>
       </div>
     </header>
+    <CommandBar v-if="currentUser" :pages="pages" />
     <SupportCard v-if="currentUser" />
     <div class="main">
       <main class="content" :class="{ fill: route.meta.fill }" :style="bgStyle(backgrounds.app)">

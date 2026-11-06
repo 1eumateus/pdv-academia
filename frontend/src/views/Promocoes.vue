@@ -9,6 +9,8 @@ import ProductSearch from '../components/ProductSearch.vue'
 import { centsToInput, money, parseMoney, today } from '../composables/format'
 import { useToast } from '../composables/toast'
 import { models, type Category, type Product } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 const toast = useToast()
 const promos = ref<models.Promotion[]>([])
@@ -87,6 +89,8 @@ async function save() {
     form.busy = false
   }
 }
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgPromocoes = usePaged(() => filtered.value, [term])
 </script>
 
 <template>
@@ -113,7 +117,7 @@ async function save() {
       <table>
         <thead><tr><th>Promoção</th><th>Vale para</th><th>Regra</th><th>Período</th><th>Situação</th><th></th></tr></thead>
         <tbody>
-          <tr v-for="p in filtered" :key="p.id" :class="{ inactive: p.status === 'encerrada' || p.status === 'inativa' }">
+          <tr v-for="p in pgPromocoes.visible" :key="p.id" :class="{ inactive: p.status === 'encerrada' || p.status === 'inativa' }">
             <td class="left">{{ p.name }}<div class="small muted">{{ kindLabels[p.kind] }}</div></td>
             <td>{{ p.productName ?? `Categoria: ${p.categoryName}` }}</td>
             <td>{{ rule(p) }}</td>
@@ -123,6 +127,7 @@ async function save() {
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgPromocoes" />
     </div>
   </section>
 

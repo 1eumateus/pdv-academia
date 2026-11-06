@@ -14,6 +14,8 @@ import ReceiptModal from '../components/ReceiptModal.vue'
 import ReturnModal from '../components/ReturnModal.vue'
 import SaleDetailsModal from '../components/SaleDetailsModal.vue'
 import type { models } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 const refundLabels: Record<string, string> = { vale_troca: 'Vale-troca', dinheiro: 'Dinheiro', fiado: 'Abatido no a prazo', pix: 'Pix', cartao: 'Estorno no cartão' }
 const refundBadge: Record<string, string> = { vale_troca: 'ok', dinheiro: 'warn', fiado: '', pix: 'warn', cartao: 'warn' }
@@ -142,6 +144,8 @@ const totals = computed(() => {
   }
   return { total, by }
 })
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgDevolucoes = usePaged(() => filtered.value, [term, start, end])
 </script>
 
 <template>
@@ -227,7 +231,7 @@ const totals = computed(() => {
         <colgroup><col style="width: 6%" /><col style="width: 13%" /><col style="width: 8%" /><col style="width: 14%" /><col style="width: 25%" /><col style="width: 12%" /><col style="width: 10%" /><col style="width: 12%" /></colgroup>
         <thead><tr><th>Nº</th><th>Data</th><th>Venda</th><th>Cliente</th><th>Itens e motivo</th><th>Reembolso</th><th class="right">Valor</th><th></th></tr></thead>
         <tbody>
-          <tr v-for="r in filtered" :key="r.id">
+          <tr v-for="r in pgDevolucoes.visible" :key="r.id">
             <td class="muted">{{ r.id }}</td>
             <td class="nowrap">{{ formatDateTime(r.createdAt) }}<div v-if="r.userName" class="small muted">{{ r.userName }}</div></td>
             <td><button class="link" @click="saleAsCupom = false; saleId = r.saleId">nº {{ r.saleId }}</button></td>
@@ -244,6 +248,7 @@ const totals = computed(() => {
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgDevolucoes" />
     </div>
   </section>
 

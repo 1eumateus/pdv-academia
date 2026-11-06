@@ -2,10 +2,12 @@
 <script setup lang="ts">
 import Icon from '../components/Icon.vue'
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { DeleteCustomer, GetCustomerHistory, ListCustomers, SetCustomerActive } from '../../wailsjs/go/main/App'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CustomerFormModal from '../components/CustomerFormModal.vue'
 import PurgeCustomerDialog from '../components/PurgeCustomerDialog.vue'
+import CustomerAvatar from '../components/CustomerAvatar.vue'
 import { call, errorMessage } from '../api'
 import { exportTable } from '../composables/exportTable'
 import { can } from '../composables/session'
@@ -15,6 +17,8 @@ import { openWhatsapp } from '../composables/charge'
 import { storeName } from '../composables/cashState'
 import { useToast } from '../composables/toast'
 import { type Customer, type models } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 const toast = useToast()
 const customers = ref<Customer[]>([])
@@ -46,6 +50,12 @@ async function load() {
   loadError.value = ''
   try {
     customers.value = await call(ListCustomers(term.value))
+    // Veio da busca universal (?id=): abre o cliente escolhido.
+    const want = customers.value.find((c) => c.id === pendingId.value)
+    if (want) {
+      pendingId.value = null
+      select(want)
+    }
   } catch (e) {
     loadError.value = errorMessage(e)
   } finally {
@@ -53,6 +63,16 @@ async function load() {
   }
 }
 onMounted(load)
+// Busca universal: /clientes?busca=<nome>&id=<id> filtra e abre o cliente.
+const route = useRoute()
+const pendingId = ref<number | null>(null)
+watch(() => route.query, (q) => {
+  if (typeof q.busca !== 'string') return
+  pendingId.value = Number(q.id) || null
+  sub.value = 'todos'
+  if (term.value === q.busca) load()
+  else term.value = q.busca
+}, { immediate: true })
 
 // Ativar/inativar direto na lista; excluir só quem não tem histórico (o sistema recusa os outros).
 async function toggleActive(c: Customer) {
@@ -130,14 +150,13 @@ function address(c: Customer) {
   const street = [c.street, c.number].filter(Boolean).join(', ')
   return [street, c.complement, c.district, [c.city, c.state].filter(Boolean).join('/')].filter(Boolean).join(' · ')
 }
-const avatarColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#8b5cf6', '#84cc16', '#f97316', '#14b8a6']
-const avatar = (c: Customer) => ({ background: avatarColors[c.id % avatarColors.length] })
-const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((w) => w.charAt(0)).join('').toUpperCase()
 
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgClientes = usePaged(() => customers.value, [term, sub])
 </script>
 
 <template>
-  <section class="card stack">
+  <section class="card stack cust-page">
     <div class="tabs seg" role="tablist" aria-label="Clientes">
       <button role="tab" :aria-selected="sub === 'todos'" @click="sub = 'todos'">Todos</button>
       <button role="tab" :aria-selected="sub === 'aniversariantes'" @click="sub = 'aniversariantes'">Aniversariantes</button>
@@ -170,7 +189,7 @@ const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((w) 
         <thead><tr><th>Cliente</th><th>Aniversário</th><th>Telefone</th><th class="right">Ações</th></tr></thead>
         <tbody>
           <tr v-for="b in birthdays" :key="b.c.id">
-            <td><div class="cust-cell"><span class="avatar" :style="avatar(b.c)">{{ initials(b.c.name) }}</span>
+            <td><div class="cust-cell"><CustomerAvatar :id="b.c.id" :name="b.c.name" />
               <span>{{ b.c.name }}<small class="muted">faz {{ b.age }} anos</small></span></div></td>
             <td class="nowrap">{{ ddmm(b.c.birthDate!) }} <span v-if="b.days === 0" class="badge ok">hoje</span><span v-else-if="b.days < 7" class="small muted">em {{ b.days }} dia(s)</span></td>
             <td class="nowrap">{{ b.c.phone || '—' }}</td>
@@ -187,8 +206,8 @@ const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((w) 
           <tr><th>Cliente</th><th>Telefone</th><th>Situação</th><th class="right">Ações</th></tr>
         </thead>
         <tbody>
-          <tr v-for="c in customers" :key="c.id" class="clickable" :class="{ inactive: !c.active, selected: c.id === selectedId }" @click="select(c)">
-            <td><div class="cust-cell"><span class="avatar" :style="avatar(c)">{{ initials(c.name) }}</span>
+          <tr v-for="c in pgClientes.visible" :key="c.id" class="clickable" :class="{ inactive: !c.active, selected: c.id === selectedId }" @click="select(c)">
+            <td><div class="cust-cell"><CustomerAvatar :id="c.id" :name="c.name" />
               <span>{{ c.name }}<small v-if="c.city" class="muted">{{ c.city }}<template v-if="c.district"> · {{ c.district }}</template></small></span></div></td>
             <td class="nowrap">{{ c.phone || '—' }}</td>
             <td><span class="badge" :class="c.active ? 'ok' : ''">{{ c.active ? 'Ativo' : 'Inativo' }}</span></td>
@@ -203,12 +222,13 @@ const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((w) 
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgClientes" />
     </div>
     <aside v-if="sub === 'todos'" class="cust-detail">
       <div v-if="!selected" class="state">Clique num cliente para ver a ficha, o saldo a prazo e as compras.</div>
       <template v-else>
         <div class="detail-head">
-          <span class="avatar big" :style="avatar(selected)">{{ initials(selected.name) }}</span>
+          <CustomerAvatar :id="selected.id" :name="selected.name" big />
           <div class="detail-id">
             <strong>{{ selected.name }}</strong>
             <span class="small muted">
@@ -276,9 +296,19 @@ const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((w) 
 
 <style scoped>
 /* Lista à esquerda, ficha do cliente selecionado à direita. */
-.cust-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 18px; align-items: start; }
-@media (max-width: 1200px) { .cust-split { grid-template-columns: minmax(0, 1fr); } }
-.cust-list { max-height: calc(100vh - 290px); overflow: auto; }
+/* A tela cabe na janela (rota com fill): a página não rola; só a lista (e a
+   ficha, se for maior) rolam por dentro. */
+.cust-page { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.cust-page > .table-wrap { flex: 1; min-height: 0; overflow: auto; }
+.cust-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 18px; align-items: stretch; }
+.cust-list { min-height: 0; overflow: auto; }
+.cust-detail { min-height: 0; overflow: auto; }
+/* Janela estreita: lista e ficha uma embaixo da outra, e a página volta a rolar. */
+@media (max-width: 1200px) {
+  .cust-page { overflow: auto; }
+  .cust-split { flex: none; grid-template-columns: minmax(0, 1fr); }
+  .cust-list { max-height: 60vh; }
+}
 /* Aniversariantes: só a lista, na largura toda (sem a ficha ao lado). */
 .cust-split.solo { grid-template-columns: minmax(0, 1fr); }
 .cust-cell { display: flex; align-items: center; gap: 12px; }

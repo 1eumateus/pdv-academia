@@ -15,6 +15,8 @@ import Modal from '../components/Modal.vue'
 import { centsToInput, money, parseMoney, today } from '../composables/format'
 import { useToast } from '../composables/toast'
 import { models } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 type Bill = models.Bill
 const toast = useToast()
@@ -243,6 +245,8 @@ async function remove() {
     toast.error(errorMessage(e))
   }
 }
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgContas = usePaged(() => filtered.value, [term, view, month])
 </script>
 
 <template>
@@ -297,7 +301,7 @@ async function remove() {
       <table>
         <thead><tr><th>{{ view === 'pagas' ? 'Pago em' : 'Vencimento' }}</th><th>Descrição</th><th>Categoria</th><th>Favorecido</th><th>Valor</th><th>Situação</th><th class="right">Ações</th></tr></thead>
         <tbody>
-          <tr v-for="b in filtered" :key="b.id">
+          <tr v-for="b in pgContas.visible" :key="b.id">
             <td class="nowrap">{{ brDate(b.status === 'paga' && b.paidDate ? b.paidDate : b.dueDate) }}</td>
             <td class="left">
               {{ b.description }} <span v-if="b.recurring" class="small muted" title="Repete todo mês">↻</span>
@@ -321,6 +325,7 @@ async function remove() {
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgContas" />
     </div>
     <p v-if="view !== 'pagas' && filtered.length" class="small muted" style="margin: 0">Total: <strong class="mono">{{ money(openTotal) }}</strong></p>
   </section>

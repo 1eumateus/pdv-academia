@@ -7,6 +7,7 @@ import { GetBackupStatus, GetDashboard, RunBackupNow } from '../../wailsjs/go/ma
 import { call, errorMessage } from '../api'
 import Icon from '../components/Icon.vue'
 import { money } from '../composables/format'
+import { alerts as pendings, refreshAlerts } from '../composables/alerts'
 import { can } from '../composables/session'
 import { useToast } from '../composables/toast'
 import type { models } from '../types'
@@ -20,6 +21,7 @@ async function load() {
   error.value = ''
   try {
     d.value = await call(GetDashboard())
+    refreshAlerts()
   } catch (e) {
     error.value = errorMessage(e)
   } finally {
@@ -101,23 +103,7 @@ const shortcuts = computed(() => [
   <div v-else-if="!d" class="state">Carregando o painel…</div>
   <div v-else class="dash">
     <div class="dash-top">
-      <div class="notices">
-        <div v-if="backupWarn" class="notice warn" role="status">
-          <strong>Backup:</strong> {{ backupWarn }}
-          <router-link v-if="noExternal && can('alterar_configuracoes')" to="/configuracoes" class="go">Configurar</router-link>
-          <button v-else-if="!noExternal" class="link go" :disabled="backupBusy" @click="copyNow">{{ backupBusy ? 'Copiando…' : 'Copiar agora' }}</button>
-        </div>
-        <router-link v-if="can('contas_a_pagar') && (d.billsDueToday || d.billsOverdue)" to="/financeiro/contas" class="notice" :class="d.billsOverdue ? 'bad' : 'warn'">
-          <span v-if="d.billsDueToday">{{ d.billsDueToday }} conta(s) vence(m) hoje</span>
-          <span v-if="d.billsDueToday && d.billsOverdue"> e </span>
-          <span v-if="d.billsOverdue">{{ d.billsOverdue }} conta(s) vencida(s)</span>
-        </router-link>
-        <router-link v-if="alertCount" to="/estoque?view=alerta" class="notice" :class="d.zeroStockCount ? 'bad' : 'warn'">
-          <span v-if="d.zeroStockCount">{{ d.zeroStockCount }} produto(s) sem estoque</span>
-          <span v-if="d.zeroStockCount && d.lowStockCount"> e </span>
-          <span v-if="d.lowStockCount">{{ d.lowStockCount }} com estoque baixo</span>
-        </router-link>
-      </div>
+      <span class="spacer" />
       <span class="small muted">{{ d.allSales ? 'Todos os operadores' : 'Somente as suas vendas' }}</span>
       <button :disabled="loading" @click="load">{{ loading ? 'Atualizando…' : 'Atualizar' }}</button>
     </div>
@@ -159,6 +145,17 @@ const shortcuts = computed(() => [
         <div class="kpi-foot small muted"><span class="badge">{{ d.creditCustomers }} cliente(s)</span></div>
       </router-link>
     </div>
+
+    <!-- Para resolver agora: os mesmos alertas do sino, cada um com a ação. -->
+    <section v-if="pendings.length" class="card pending">
+      <div class="card-head"><strong>Para resolver agora</strong><span class="badge" :class="pendings.some((a) => a.level === 'bad') ? 'bad' : 'warn'">{{ pendings.length }} pendência(s)</span></div>
+      <div v-for="a in pendings" :key="a.id" class="pending-row">
+        <span class="dot" :class="a.level" />
+        <span class="txt">{{ a.text }}</span>
+        <button v-if="a.id === 'backup' && !noExternal" class="link" :disabled="backupBusy" @click="copyNow">{{ backupBusy ? 'Copiando…' : 'Copiar agora' }}</button>
+        <router-link :to="a.to" class="pending-go">{{ a.action || 'Ver' }} →</router-link>
+      </div>
+    </section>
 
     <div class="dash-row">
       <section class="card">
@@ -248,4 +245,12 @@ const shortcuts = computed(() => [
 .list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .list li:last-child { border-bottom: 0; }
 .list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pending { padding-bottom: 6px; }
+.pending-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--border); font-size: 14px; }
+.pending-row:first-of-type { border-top: 0; }
+.pending-row .txt { flex: 1; }
+.pending-row .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--muted); }
+.pending-row .dot.bad { background: var(--danger); } .pending-row .dot.warn { background: var(--warning); } .pending-row .dot.info { background: var(--primary); }
+.pending-go { font-weight: 600; font-size: 13px; text-decoration: none; padding: 5px 11px; border-radius: 8px; background: var(--primary-soft); color: var(--primary); white-space: nowrap; }
+.pending-go:hover { background: var(--primary); color: #fff; }
 </style>

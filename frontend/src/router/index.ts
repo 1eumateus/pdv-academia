@@ -14,7 +14,7 @@ export const router = createRouter({
     { path: '/devolucoes', component: () => import('../views/Devolucoes.vue'), meta: { title: 'Trocas e devoluções' } },
     { path: '/produtos', component: () => import('../views/Produtos.vue'), meta: { title: 'Produtos', mode: 'produtos' } },
     { path: '/estoque', component: () => import('../views/Produtos.vue'), meta: { title: 'Estoque', mode: 'estoque' } },
-    { path: '/clientes', component: () => import('../views/Clientes.vue'), meta: { title: 'Clientes' } },
+    { path: '/clientes', component: () => import('../views/Clientes.vue'), meta: { title: 'Clientes', fill: true } },
     { path: '/fiado', component: () => import('../views/Fiado.vue'), meta: { title: 'A prazo' } },
     // A lista de assinaturas fica dentro de Alunos e rostos (Mensalidades e cobrança).
     { path: '/assinaturas', redirect: '/catraca/alunos?aba=mensalidades' },

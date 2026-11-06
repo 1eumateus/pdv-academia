@@ -20,6 +20,8 @@ import { openWhatsapp } from '../composables/charge'
 import { settings } from '../composables/cashState'
 import { brDate, planLabel } from '../composables/subscriptions'
 import { models, type Customer, type Product } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 type Sub = models.Subscription
 
@@ -141,6 +143,10 @@ onMounted(load)
 
 // Histórico do aluno (clique na linha): assinaturas, mensalidades e ações.
 const customerHist = ref<{ id: number; name: string } | null>(null)
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgMensalidades = usePaged(() => filtered.value, [term, view, from, to, planFilter])
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgAniversarios = usePaged(() => birthdays.value, [term, period])
 </script>
 
 <template>
@@ -186,7 +192,7 @@ const customerHist = ref<{ id: number; name: string } | null>(null)
         <table>
           <thead><tr><th class="left">Aluno</th><th>Aniversário</th><th class="right">Faz</th><th class="left">Plano</th><th></th></tr></thead>
           <tbody>
-            <tr v-for="b in birthdays" :key="b.c.id" class="clickable" title="Ver o histórico do aluno" @click="customerHist = { id: b.c.id, name: b.c.name }">
+            <tr v-for="b in pgAniversarios.visible" :key="b.c.id" class="clickable" title="Ver o histórico do aluno" @click="customerHist = { id: b.c.id, name: b.c.name }">
               <td class="left"><strong class="customer-name">{{ b.c.name }}</strong></td>
               <td class="nowrap">{{ ddmm(b.c.birthDate!) }} <span v-if="b.days === 0" class="badge ok">hoje</span><span v-else-if="b.days < 7" class="small muted">em {{ b.days }} dia(s)</span></td>
               <td class="right mono">{{ b.age }} anos</td>
@@ -198,6 +204,7 @@ const customerHist = ref<{ id: number; name: string } | null>(null)
             </tr>
           </tbody>
         </table>
+          <LoadMore :paged="pgAniversarios" />
       </div>
     </template>
 
@@ -228,7 +235,7 @@ const customerHist = ref<{ id: number; name: string } | null>(null)
           </tr>
         </thead>
         <tbody>
-          <tr v-for="s in filtered" :key="s.id" class="clickable" title="Ver o histórico do aluno" @click="customerHist = { id: s.customerId, name: s.customerName }">
+          <tr v-for="s in pgMensalidades.visible" :key="s.id" class="clickable" title="Ver o histórico do aluno" @click="customerHist = { id: s.customerId, name: s.customerName }">
             <td class="left"><strong class="customer-name">{{ s.customerName }}</strong></td>
             <td class="left clip" :title="rulesLabel(s) ? `Acesso: ${rulesLabel(s)}` : ''">{{ s.planName }} <span class="small muted">· {{ planLabel(s.planDays) }}</span></td>
             <template v-if="view === 'vencimentos'">
@@ -248,6 +255,7 @@ const customerHist = ref<{ id: number; name: string } | null>(null)
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgMensalidades" />
     </div>
     </template>
   </section>

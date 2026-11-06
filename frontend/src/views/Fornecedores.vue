@@ -8,6 +8,8 @@ import Modal from '../components/Modal.vue'
 import { formatAddress } from '../composables/format'
 import { useToast } from '../composables/toast'
 import { models, type Supplier } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 const toast = useToast()
 const suppliers = ref<Supplier[]>([])
@@ -61,6 +63,8 @@ function formatDoc(d: string): string {
   if (d.length === 11) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`
   return d || '—'
 }
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgFornecedores = usePaged(() => suppliers.value, [term])
 </script>
 
 <template>
@@ -77,7 +81,7 @@ function formatDoc(d: string): string {
       <table>
         <thead><tr><th>Fornecedor</th><th>CNPJ/CPF</th><th>Contato</th><th>Cidade</th><th></th></tr></thead>
         <tbody>
-          <tr v-for="s in suppliers" :key="s.id" :class="{ inactive: !s.active }">
+          <tr v-for="s in pgFornecedores.visible" :key="s.id" :class="{ inactive: !s.active }">
             <td class="left">
               {{ s.legalName }} <span v-if="!s.active" class="badge">Inativo</span>
               <div v-if="s.tradeName" class="small muted">{{ s.tradeName }}</div>
@@ -89,6 +93,7 @@ function formatDoc(d: string): string {
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgFornecedores" />
     </div>
   </section>
 

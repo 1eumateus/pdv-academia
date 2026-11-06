@@ -18,6 +18,8 @@ import { useRouter } from 'vue-router'
 import { centsToInput, formatDateTime, money, parseDiscount, parseQty, today } from '../composables/format'
 import { useToast } from '../composables/toast'
 import { models, type Product } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 const toast = useToast()
 const router = useRouter()
@@ -161,6 +163,8 @@ async function whatsapp(q: models.Quote) {
   }
 }
 
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgOrcamentos = usePaged(() => filtered.value, [term, start, end, statusFilter])
 </script>
 
 <template>
@@ -185,7 +189,7 @@ async function whatsapp(q: models.Quote) {
       <table>
         <thead><tr><th>Nº</th><th>Criado em</th><th>Cliente</th><th>Operador</th><th class="right">Total</th><th>Validade</th><th>Situação</th><th class="right">Ações</th></tr></thead>
         <tbody>
-          <tr v-for="q in filtered" :key="q.id" class="clickable" :class="rowClass[q.status]"
+          <tr v-for="q in pgOrcamentos.visible" :key="q.id" class="clickable" :class="rowClass[q.status]"
             title="Clique para ver e editar os itens" @click="openEditor(q.id)">
             <td>nº {{ q.id }}</td>
             <td class="nowrap small">{{ formatDateTime(q.createdAt) }}</td>
@@ -206,6 +210,7 @@ async function whatsapp(q: models.Quote) {
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgOrcamentos" />
     </div>
   </section>
 

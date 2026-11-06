@@ -26,6 +26,8 @@ import { can } from '../composables/session'
 import { useToast } from '../composables/toast'
 import { useRowMenu } from '../composables/rowMenu'
 import { type Customer } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 type Member = models.GateMember
 
@@ -66,6 +68,11 @@ async function load() {
   try {
     members.value = await call(ListGateMembers(term.value))
     error.value = ''
+    const want = members.value.find((m) => m.customerId === pendingFicha.value)
+    if (want) {
+      pendingFicha.value = null
+      openFicha(want)
+    }
   } catch (e) {
     error.value = errorMessage(e)
   } finally {
@@ -73,6 +80,15 @@ async function load() {
   }
 }
 onMounted(load)
+// Busca universal: /catraca/alunos?busca=<nome>&ficha=<id> filtra e abre a ficha.
+const pendingFicha = ref<number | null>(null)
+watch(() => [route.query.busca, route.query.ficha], ([b, f]) => {
+  if (typeof b !== 'string') return
+  mode.value = 'alunos'
+  pendingFicha.value = Number(f) || null
+  if (term.value === b) load()
+  else term.value = b
+}, { immediate: true })
 let timer: number | undefined
 watch(term, () => {
   window.clearTimeout(timer)
@@ -232,6 +248,8 @@ async function release(m: Member) {
   }
 }
 
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgAlunos = usePaged(() => filtered.value, [term, view, mode])
 </script>
 
 <template>
@@ -265,7 +283,7 @@ async function release(m: Member) {
       <table>
         <thead><tr><th class="left">Aluno</th><th class="left">Plano</th><th>Catraca</th><th>Rosto</th><th>Último acesso</th><th></th></tr></thead>
         <tbody>
-          <tr v-for="m in filtered" :key="m.customerId" class="clickable" :class="{ inactive: m.blocked || !m.active }" title="Abrir a ficha do aluno" @click="openFicha(m)">
+          <tr v-for="m in pgAlunos.visible" :key="m.customerId" class="clickable" :class="{ inactive: m.blocked || !m.active }" title="Abrir a ficha do aluno" @click="openFicha(m)">
             <td class="left"><strong>{{ m.name }}</strong><div v-if="m.phone" class="small muted">{{ m.phone }}</div></td>
             <td class="left small clip" :title="plansLabel(m)">{{ plansLabel(m) || '—' }}<div v-if="m.freeUntil" class="small muted">Cortesia até {{ brDate(m.freeUntil) }}</div></td>
             <td class="left gate-cell" :title="m.reason">
@@ -296,6 +314,7 @@ async function release(m: Member) {
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgAlunos" />
     </div>
   </section>
 

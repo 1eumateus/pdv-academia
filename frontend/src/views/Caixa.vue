@@ -15,6 +15,8 @@ import type { ReceiptKind } from '../composables/receipt'
 import { cashTypeLabels, formatDateTime, money, parseMoney, paymentLabels, saleMethodLabel } from '../composables/format'
 import { useToast } from '../composables/toast'
 import type { CashSession, CashSummary, models } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 const toast = useToast()
 const summary = ref<CashSummary | null>(null)
@@ -143,6 +145,8 @@ async function showSession(id: number) {
     toast.error(errorMessage(e))
   }
 }
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgSessoes = usePaged(() => sessions.value, [])
 </script>
 
 <template>
@@ -289,7 +293,7 @@ async function showSession(id: number) {
       <table>
         <thead><tr><th>Operador</th><th>Abertura</th><th>Fechamento</th><th class="right">Esperado</th><th class="right">Contado</th><th class="right">Diferença</th><th></th></tr></thead>
         <tbody>
-          <tr v-for="s in sessions" :key="s.id">
+          <tr v-for="s in pgSessoes.visible" :key="s.id">
             <td>{{ s.openedByName ?? '—' }}</td>
             <td class="nowrap">{{ formatDateTime(s.openedAt) }}</td>
             <td class="nowrap">{{ s.closedAt ? formatDateTime(s.closedAt) : 'Aberta' }}</td>
@@ -303,6 +307,7 @@ async function showSession(id: number) {
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgSessoes" />
     </div>
   </section>
 

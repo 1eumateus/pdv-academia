@@ -2,6 +2,9 @@
 <script setup lang="ts">
 // Ícones de traço 24×24 (desenho no estilo Lucide). O botão leva title/aria-label.
 const paths: Record<string, string[]> = {
+  // lupa (busca universal) e sino (alertas)
+  busca: ['M11 18a7 7 0 1 0 0-14a7 7 0 0 0 0 14z', 'm20 20-3.5-3.5'],
+  sino: ['M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9', 'M10.3 21a1.94 1.94 0 0 0 3.4 0'],
   // três pontos (mais ações)
   mais: ['M4 12a1 1 0 1 0 2 0a1 1 0 1 0-2 0', 'M11 12a1 1 0 1 0 2 0a1 1 0 1 0-2 0', 'M18 12a1 1 0 1 0 2 0a1 1 0 1 0-2 0'],
   // lápis

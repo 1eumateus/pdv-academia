@@ -8,6 +8,8 @@ import SaleDetailsModal from '../components/SaleDetailsModal.vue'
 import SellerFilter from '../components/SellerFilter.vue'
 import { formatDateTime, money, paymentLabels, saleMethodLabel, today } from '../composables/format'
 import type { Sale } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 const start = ref(today())
 const end = ref(today())
@@ -64,6 +66,8 @@ async function load() {
   }
 }
 onMounted(load)
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgVendas = usePaged(() => filtered.value, [term, start, end])
 </script>
 
 <template>
@@ -112,7 +116,7 @@ onMounted(load)
         <table class="left-table">
           <thead><tr><th>Venda</th><th>Data</th><th>Itens</th><th>Cliente</th><th>Operador</th><th>Forma</th><th class="num">Desconto</th><th class="num">Total</th><th>Situação</th></tr></thead>
           <tbody>
-            <tr v-for="s in filtered" :key="s.id" :class="{ inactive: s.status === 'cancelada' }">
+            <tr v-for="s in pgVendas.visible" :key="s.id" :class="{ inactive: s.status === 'cancelada' }">
               <td><button class="link mono" @click="saleId = s.id"><strong>nº {{ s.id }}</strong></button></td>
               <td class="nowrap muted">{{ formatDateTime(s.createdAt) }}</td>
               <td class="items">{{ s.itemsLabel || '—' }}</td>
@@ -125,6 +129,7 @@ onMounted(load)
             </tr>
           </tbody>
         </table>
+          <LoadMore :paged="pgVendas" />
       </div>
     </template>
   </section>

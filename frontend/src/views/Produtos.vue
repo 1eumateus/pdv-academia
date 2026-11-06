@@ -24,6 +24,8 @@ import { settings } from '../composables/cashState'
 import { centsToInput, formatDateTime, money, parseMoney, parseQty, stockLevel, stockReasonLabels, today } from '../composables/format'
 import { useToast } from '../composables/toast'
 import { models, type Category, type Product, type StockMovement } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 const toast = useToast()
 const route = useRoute()
@@ -151,6 +153,8 @@ onMounted(() => {
   load()
   loadCategories()
 })
+// Busca universal: /produtos?busca=<nome> já chega filtrado.
+watch(() => route.query.busca, (b) => { if (typeof b === 'string') filter.value = b }, { immediate: true })
 
 // ---------- cadastro / edição ----------
 const form = reactive({
@@ -368,6 +372,8 @@ async function loadHist() {
 }
 
 const opTitles: Record<StockOp, string> = { entrada: 'Entrada de estoque', ajuste: 'Ajuste de estoque', devolucao: 'Devolução ao estoque' }
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgProdutos = usePaged(() => filtered.value, [filter, view, sortBy, categoryFilter, sub, stockMode])
 </script>
 
 <template>
@@ -458,7 +464,7 @@ const opTitles: Record<StockOp, string> = { entrada: 'Entrada de estoque', ajust
           </th><th v-if="can('ver_custo')" class="center col-money">Margem</th><th class="right">Ações</th></tr>
         </thead>
         <tbody>
-          <tr v-for="p in filtered" :key="p.id" :class="{ inactive: !p.active, 'stock-zerado': stockMode && p.active && level(p) === 'zerado', 'stock-baixo': stockMode && p.active && isLow(p) }">
+          <tr v-for="p in pgProdutos.visible" :key="p.id" :class="{ inactive: !p.active, 'stock-zerado': stockMode && p.active && level(p) === 'zerado', 'stock-baixo': stockMode && p.active && isLow(p) }">
             <td class="product-cell left">
               <span class="p-thumb" :style="{ background: thumbColors[p.id % thumbColors.length] }">{{ p.name.trim().slice(0, 2).toUpperCase() }}</span>
               <span class="product-name">{{ p.name }}</span>
@@ -503,6 +509,7 @@ const opTitles: Record<StockOp, string> = { entrada: 'Entrada de estoque', ajust
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgProdutos" />
     </div>
     <p class="small muted" style="margin: 0">
       <template v-if="stockMode">O estoque só muda por entrada, ajuste, devolução, venda ou cancelamento, sempre com registro. * = mínimo padrão das Configurações.</template>

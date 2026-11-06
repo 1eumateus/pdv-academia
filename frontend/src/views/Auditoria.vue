@@ -6,6 +6,8 @@ import { call, errorMessage } from '../api'
 import { formatDateTime, money, today } from '../composables/format'
 import { can } from '../composables/session'
 import type { AuditEntry, Product } from '../types'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 const tab = ref<'operacoes' | 'produtos'>('operacoes')
 // Produtos cadastrados: todos, pela data de cadastro, mais recentes primeiro.
@@ -77,6 +79,10 @@ async function load() {
   }
 }
 onMounted(load)
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgAuditoria = usePaged(() => filtered.value, [term, start, end, tab])
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgCadastros = usePaged(() => registered.value, [tab])
 </script>
 
 <template>
@@ -99,7 +105,7 @@ onMounted(load)
       <table>
         <thead><tr><th>Data</th><th>Usuário</th><th>Ação</th><th>Autorizado por</th><th>Detalhes</th></tr></thead>
         <tbody>
-          <tr v-for="e in filtered" :key="e.id">
+          <tr v-for="e in pgAuditoria.visible" :key="e.id">
             <td class="nowrap">{{ formatDateTime(e.createdAt) }}</td>
             <td>{{ e.userName ?? '—' }}</td>
             <td>{{ actionLabels[e.action] ?? e.action }}<span v-if="e.entityId" class="small muted"> nº {{ e.entityId }}</span></td>
@@ -108,6 +114,7 @@ onMounted(load)
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgAuditoria" />
     </div>
   </section>
 
@@ -120,7 +127,7 @@ onMounted(load)
       <table>
         <thead><tr><th class="left">Cadastrado em</th><th class="left">Produto</th><th class="left">SKU / código</th><th v-if="can('ver_custo')" class="right">Custo</th><th class="right">Preço</th><th class="right">Estoque</th></tr></thead>
         <tbody>
-          <tr v-for="p in registered" :key="p.id" :class="{ inactive: !p.active }">
+          <tr v-for="p in pgCadastros.visible" :key="p.id" :class="{ inactive: !p.active }">
             <td class="nowrap left">{{ formatDateTime(p.createdAt) }}</td>
             <td class="left">{{ p.name }} <span v-if="!p.active" class="badge">Inativo</span></td>
             <td class="small mono left">{{ [p.sku, p.barcode].filter(Boolean).join(' · ') || '—' }}</td>
@@ -130,6 +137,7 @@ onMounted(load)
           </tr>
         </tbody>
       </table>
+          <LoadMore :paged="pgCadastros" />
     </div>
   </section>
 </template>

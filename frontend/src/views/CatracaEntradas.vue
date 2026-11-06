@@ -8,6 +8,8 @@ import { models } from '../../wailsjs/go/models'
 import { call, errorMessage } from '../api'
 import { exportTable, savePdf } from '../composables/exportTable'
 import { formatDateTime, today } from '../composables/format'
+import LoadMore from '../components/LoadMore.vue'
+import { usePaged } from '../composables/paged'
 
 // Um ano de academia passa de dezenas de milhares de linhas: a tela mostra as
 // primeiras; o Excel leva todas.
@@ -50,6 +52,8 @@ function exportExcel() {
     [['Data e hora', 'text'], ['Aluno', 'text'], ['Situação', 'text'], ['Motivo', 'text'], ['Origem', 'text'], ['Liberado por', 'text']],
     rows.value.map((e) => [formatDateTime(e.at), e.name, e.allowed ? 'Liberado' : 'Negado', e.reason, sourceLabel[e.source] ?? e.source, e.userName]))
 }
+// Lista longa aos poucos (50 por vez; volta ao começo quando muda o filtro).
+const pgEntradas = usePaged(() => shown.value, [term, start, end, status])
 </script>
 
 <template>
@@ -84,7 +88,7 @@ function exportExcel() {
         <table>
           <thead><tr><th>Data e hora</th><th class="left">Aluno</th><th>Situação</th><th class="left">Motivo</th><th>Origem</th></tr></thead>
           <tbody>
-            <tr v-for="e in shown" :key="e.id">
+            <tr v-for="e in pgEntradas.visible" :key="e.id">
               <td class="mono nowrap">{{ formatDateTime(e.at) }}</td>
               <td class="left">{{ e.name || '—' }}</td>
               <td><span class="badge" :class="e.allowed ? 'ok' : 'bad'">{{ e.allowed ? 'Liberado' : 'Negado' }}</span></td>
@@ -93,6 +97,7 @@ function exportExcel() {
             </tr>
           </tbody>
         </table>
+          <LoadMore :paged="pgEntradas" />
       </div>
       <p v-if="rows.length > MAX_ROWS" class="small muted no-print" style="margin: 0">
         Mostrando as primeiras {{ MAX_ROWS }} de {{ rows.length }}. O Excel leva todas; para o PDF, diminua o período.
