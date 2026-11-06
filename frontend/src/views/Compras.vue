@@ -1,5 +1,6 @@
 <!-- Caminho: pdv/frontend/src/views/Compras.vue -->
 <script setup lang="ts">
+import BarList, { type BarItem } from '../components/BarList.vue'
 import Icon from '../components/Icon.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { CancelPurchase, CreateProduct, CreatePurchase, GetPurchase, ListPurchases, ListSuppliers, PickNFeFiles } from '../../wailsjs/go/main/App'
@@ -17,6 +18,22 @@ const toast = useToast()
 const start = ref(today(-30))
 const end = ref(today())
 const purchases = ref<models.Purchase[]>([])
+// Indicadores do período (estornadas ficam fora do total).
+const valid = computed(() => purchases.value.filter((p) => !p.cancelledAt))
+const periodTotal = computed(() => valid.value.reduce((a, p) => a + p.totalCents, 0))
+const suppliersCount = computed(() => new Set(valid.value.map((p) => p.supplierName)).size)
+// Gráfico: total comprado de cada fornecedor no período (os 8 maiores).
+const supplierBars = computed<BarItem[]>(() => {
+  const m = new Map<string, { cents: number; count: number }>()
+  for (const p of valid.value) {
+    const s = m.get(p.supplierName) ?? { cents: 0, count: 0 }
+    s.cents += p.totalCents
+    s.count++
+    m.set(p.supplierName, s)
+  }
+  return [...m].sort((a, b) => b[1].cents - a[1].cents).slice(0, 8)
+    .map(([name, s]) => ({ key: name, label: name, value: s.cents, text: money(s.cents), sub: `${s.count} entrada(s)`, color: '#06b6d4' }))
+})
 const loading = ref(false)
 const error = ref('')
 const detail = ref<models.PurchaseDetails | null>(null)
@@ -156,6 +173,32 @@ async function save() {
 </script>
 
 <template>
+  <div class="kpi-row">
+    <div class="kpi">
+      <div class="kpi-head">Entradas no período<span class="kpi-ic" style="--c: #5b4cf0"><Icon name="t-entrada" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ valid.length }}</div>
+      <div class="small muted">{{ purchases.length - valid.length }} estornada(s)</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-head">Total comprado<span class="kpi-ic" style="--c: #0e9466"><Icon name="receber" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ money(periodTotal) }}</div>
+      <div class="small muted">a preço de custo</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-head">Fornecedores<span class="kpi-ic" style="--c: #06b6d4"><Icon name="t-fornecedor" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ suppliersCount }}</div>
+      <div class="small muted">com entrada no período</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-head">Com XML da NF-e<span class="kpi-ic" style="--c: #d98b06"><Icon name="detalhes" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ valid.filter((p) => p.accessKey).length }}</div>
+      <div class="small muted">importadas pela nota</div>
+    </div>
+  </div>
+  <section v-if="supplierBars.length > 1" class="card" style="margin-bottom: 18px">
+    <div class="card-head"><strong>Compras por fornecedor</strong><span class="small muted">no período</span></div>
+    <BarList :items="supplierBars" />
+  </section>
   <section class="card stack">
     <form class="row" @submit.prevent="load">
       <label class="field" style="flex: 1; min-width: 220px">Buscar (nº da nota, chave ou fornecedor)<input v-model="term" type="search" placeholder="Ex.: 12345" /></label>
@@ -170,18 +213,18 @@ async function save() {
     <div v-if="error" class="alert error">{{ error }}</div>
     <div v-else-if="!loading && purchases.length === 0" class="state">{{ term.trim() ? 'Nenhuma entrada encontrada.' : 'Nenhuma entrada no período.' }}</div>
     <div v-else class="table-wrap">
-      <table>
-        <thead><tr><th>Entrada</th><th>Registrada em</th><th>Fornecedor</th><th>Nota</th><th class="right">Total</th><th>Por</th></tr></thead>
+      <table class="left-table">
+        <thead><tr><th>Entrada</th><th>Registrada em</th><th>Fornecedor</th><th>Nota</th><th class="num">Total</th><th>Por</th></tr></thead>
         <tbody>
           <tr v-for="p in purchases" :key="p.id" class="clickable" :class="{ inactive: p.cancelledAt }" @click="openDetail(p.id)">
-            <td><button class="link">nº {{ p.id }}</button></td>
-            <td class="nowrap">{{ formatDateTime(p.createdAt) }}</td>
-            <td class="left">{{ p.supplierName }}</td>
+            <td><button class="link mono"><strong>nº {{ p.id }}</strong></button></td>
+            <td class="nowrap muted">{{ formatDateTime(p.createdAt) }}</td>
+            <td><div class="sup"><span class="kpi-ic solid" style="--c: #06b6d4; width: 30px; height: 30px"><Icon name="t-fornecedor" :size="15" /></span>{{ p.supplierName }}</div></td>
             <td class="small">
-              {{ p.invoiceNumber || '—' }}<span v-if="p.accessKey || p.cancelledAccessKey" class="badge">XML</span>
+              {{ p.invoiceNumber || '—' }} <span v-if="p.accessKey || p.cancelledAccessKey" class="badge acc">XML</span>
               <span v-if="p.cancelledAt" class="badge bad">Estornada</span>
             </td>
-            <td class="right mono">{{ money(p.totalCents) }}</td>
+            <td class="num mono"><strong>{{ money(p.totalCents) }}</strong></td>
             <td class="small">{{ p.userName ?? '—' }}</td>
           </tr>
         </tbody>
@@ -303,3 +346,7 @@ async function save() {
   />
   <NFeImportModal v-if="nfeFiles.length" :files="nfeFiles" @close="nfeFiles = []" @imported="load" />
 </template>
+
+<style scoped>
+.sup { display: flex; align-items: center; gap: 10px; }
+</style>

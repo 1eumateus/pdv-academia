@@ -6,6 +6,7 @@ import { CloseCash, CloseOtherCash, GetCashDayTotals, GetCashSessionSummary, Get
 import { call, errorMessage } from '../api'
 import { can, currentUser } from '../composables/session'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import DonutChart from '../components/DonutChart.vue'
 import Modal from '../components/Modal.vue'
 import ReceiptModal from '../components/ReceiptModal.vue'
 import SaleDetailsModal from '../components/SaleDetailsModal.vue'
@@ -131,6 +132,10 @@ async function closeCash() {
   }
 }
 
+// Cor de cada forma de pagamento no resumo (a mesma em todas as sessões).
+const payColors: Record<string, string> = { dinheiro: '#10b981', pix: '#5b4cf0', cartao: '#06b6d4', debito: '#06b6d4', credito: '#f59e0b', fiado: '#ef4444' }
+const payColor = (method: string) => payColors[method] ?? '#8b5cf6'
+
 async function showSession(id: number) {
   try {
     pastSummary.value = await call(GetCashSessionSummary(id))
@@ -155,59 +160,73 @@ async function showSession(id: number) {
   </section>
 
   <template v-else>
-    <div class="grid grid-4">
-      <div class="stat"><div class="label">Aberto em</div><div class="value" style="font-size: 17px">{{ formatDateTime(summary.session.openedAt) }}</div></div>
-      <div class="stat"><div class="label">Saldo inicial</div><div class="value mono">{{ money(summary.session.openingCents) }}</div></div>
-      <div class="stat"><div class="label">Vendas na sessão</div><div class="value mono">{{ summary.sales.filter((s) => s.status === 'concluida').length }}</div></div>
-      <div class="stat"><div class="label">Dinheiro esperado na gaveta</div><div class="value mono">{{ money(summary.expectedCashCents) }}</div></div>
-    </div>
-    <section class="card stack" style="margin-top: 16px">
-      <div class="row">
-        <button @click="openMov('suprimento')">Suprimento (entrada)</button>
-        <button v-if="can('sangria')" @click="openMov('sangria')">Sangria (saída)</button>
-        <span class="spacer" />
-        <button @click="openReceipt('caixa', summary.session.id)">Resumo parcial</button>
-        <button class="primary" @click="Object.assign(closing, { open: true, other: null })">Fechar caixa</button>
-      </div>
-      <div class="grid grid-2">
+    <div class="cash-top">
+      <section class="cash-hero">
         <div>
-          <h3>Resumo por forma de pagamento</h3>
-          <div v-if="summary.byPaymentMethod.length === 0" class="state">Nenhuma venda ou recebimento ainda.</div>
-          <table v-else>
-            <thead><tr><th>Forma</th><th class="right">Lançamentos</th><th class="right">Total</th></tr></thead>
+          <span class="hero-status"><span class="dot" />Caixa aberto</span>
+          <div class="hero-label">Dinheiro esperado na gaveta</div>
+          <div class="hero-value mono">{{ money(summary.expectedCashCents) }}</div>
+          <div class="hero-sub">{{ summary.session.openedByName ?? currentUser?.name }} · aberto em {{ formatDateTime(summary.session.openedAt) }}</div>
+        </div>
+        <div class="hero-actions">
+          <button @click="openMov('suprimento')"><Icon name="entrada" /> Suprimento (entrada)</button>
+          <button v-if="can('sangria')" @click="openMov('sangria')"><Icon name="receber" /> Sangria (saída)</button>
+          <button @click="openReceipt('caixa', summary.session.id)"><Icon name="imprimir" /> Resumo parcial</button>
+          <button class="close" @click="Object.assign(closing, { open: true, other: null })">Fechar caixa</button>
+        </div>
+      </section>
+      <div class="cash-side">
+        <div class="kpi">
+          <div class="kpi-head">Vendas na sessão<span class="kpi-ic" style="--c: #5b4cf0"><Icon name="m-vendas" :size="18" /></span></div>
+          <div class="kpi-value mono">{{ summary.sales.filter((s) => s.status === 'concluida').length }}</div>
+          <div class="small muted">{{ summary.sales.filter((s) => s.status === 'cancelada').length }} cancelada(s)</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-head">Saldo inicial<span class="kpi-ic" style="--c: #0e9466"><Icon name="m-caixa" :size="18" /></span></div>
+          <div class="kpi-value mono">{{ money(summary.session.openingCents) }}</div>
+          <div class="small muted">informado na abertura</div>
+        </div>
+      </div>
+    </div>
+    <div class="cash-row">
+      <section class="card">
+        <div class="card-head"><strong>Resumo por forma de pagamento</strong>
+          <span class="small muted mono">Total {{ money(summary.byPaymentMethod.reduce((a, t) => a + t.totalCents, 0)) }}</span></div>
+        <div v-if="summary.byPaymentMethod.length === 0" class="state">Nenhuma venda ou recebimento ainda.</div>
+        <DonutChart v-else :items="summary.byPaymentMethod.map((t) => ({ name: paymentLabels[t.paymentMethod] ?? t.paymentMethod, value: t.totalCents, text: money(t.totalCents) }))"
+          center-label="lançamentos" :center="String(summary.byPaymentMethod.reduce((a, t) => a + t.count, 0))" style="margin-bottom: 8px" />
+        <ul v-if="summary.byPaymentMethod.length" class="pay-list">
+          <li v-for="t in summary.byPaymentMethod" :key="t.paymentMethod">
+            <span class="kpi-ic solid" :style="{ '--c': payColor(t.paymentMethod) }"><Icon name="receber" :size="16" /></span>
+            <span class="pay-name">{{ paymentLabels[t.paymentMethod] }}<small class="muted">{{ t.count }} lançamento(s)</small></span>
+            <strong class="mono">{{ money(t.totalCents) }}</strong>
+          </li>
+        </ul>
+        <p class="small muted" style="margin-top: 12px">Inclui vendas, recebimentos a prazo e estornos. Vendas a prazo não entram no caixa.</p>
+      </section>
+      <section class="card">
+        <div class="card-head"><strong>Movimentações</strong></div>
+        <div v-if="summary.movements.length === 0" class="state">Nenhuma movimentação.</div>
+        <div v-else class="table-wrap" style="max-height: 340px; overflow: auto">
+          <table class="left-table">
+            <thead><tr><th>Hora</th><th>Tipo</th><th>Forma</th><th class="num">Valor</th><th></th></tr></thead>
             <tbody>
-              <tr v-for="t in summary.byPaymentMethod" :key="t.paymentMethod">
-                <td>{{ paymentLabels[t.paymentMethod] }}</td>
-                <td class="right mono">{{ t.count }}</td>
-                <td class="right mono">{{ money(t.totalCents) }}</td>
+              <tr v-for="m in summary.movements" :key="m.id">
+                <td class="nowrap muted">{{ formatDateTime(m.createdAt) }}</td>
+                <td><span class="badge" :class="m.amountCents < 0 ? 'bad' : 'ok'">{{ cashTypeLabels[m.type] }}</span><div v-if="m.description || movementSale(m)" class="small muted">{{ m.description || movementSale(m) }}</div></td>
+                <td>{{ paymentLabels[m.paymentMethod] }}</td>
+                <td class="num mono" :style="{ color: m.amountCents < 0 ? 'var(--danger)' : '' }"><strong>{{ money(m.amountCents) }}</strong></td>
+                <td class="right">
+                  <button class="link icon-btn" v-if="m.type === 'sangria' || m.type === 'suprimento'" @click="openReceipt('movimento', m.id)" title="Comprovante" aria-label="Comprovante"><Icon name="recibo" /><span>Comprovante</span></button>
+                </td>
               </tr>
-              <tr><td><strong>Total</strong></td><td /><td class="right mono"><strong>{{ money(summary.byPaymentMethod.reduce((a, t) => a + t.totalCents, 0)) }}</strong></td></tr>
             </tbody>
           </table>
-          <p class="small muted">Inclui vendas, recebimentos a prazo e estornos. Vendas a prazo não entram no caixa.</p>
         </div>
-        <div>
-          <h3>Movimentações</h3>
-          <div v-if="summary.movements.length === 0" class="state">Nenhuma movimentação.</div>
-          <div v-else class="table-wrap" style="max-height: 320px; overflow: auto">
-            <table>
-              <thead><tr><th>Hora</th><th>Tipo</th><th>Forma</th><th class="right">Valor</th><th></th></tr></thead>
-              <tbody>
-                <tr v-for="m in summary.movements" :key="m.id">
-                  <td class="nowrap">{{ formatDateTime(m.createdAt) }}</td>
-                  <td>{{ cashTypeLabels[m.type] }}<div v-if="m.description || movementSale(m)" class="small muted">{{ m.description || movementSale(m) }}</div></td>
-                  <td>{{ paymentLabels[m.paymentMethod] }}</td>
-                  <td class="right mono" :style="{ color: m.amountCents < 0 ? 'var(--danger)' : '' }">{{ money(m.amountCents) }}</td>
-                  <td class="right">
-                    <button class="link icon-btn" v-if="m.type === 'sangria' || m.type === 'suprimento'" @click="openReceipt('movimento', m.id)" title="Comprovante" aria-label="Comprovante"><Icon name="recibo" /><span>Comprovante</span></button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-      <h3>Vendas da sessão</h3>
+      </section>
+    </div>
+    <section class="card stack" style="margin-top: 18px">
+      <div class="card-head" style="margin-bottom: 0"><strong>Vendas da sessão</strong></div>
       <div v-if="summary.sales.length === 0" class="state">Nenhuma venda nesta sessão.</div>
       <div v-else class="table-wrap">
         <table>
@@ -349,3 +368,34 @@ async function showSession(id: number) {
   <ReceiptModal v-if="receipt" :kind="receipt.kind" :id="receipt.id" @close="receipt = null" />
   <SaleDetailsModal v-if="saleId" :sale-id="saleId" allow-cancel @close="saleId = null" @changed="load" />
 </template>
+
+<style scoped>
+/* Topo do caixa aberto: o dinheiro da gaveta em destaque e as ações ao lado. */
+.cash-top { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: 18px; }
+.cash-hero { display: flex; align-items: center; gap: 28px; padding: 28px; border-radius: var(--radius); color: #fff;
+  background: linear-gradient(135deg, #14122b, #2d2581); }
+.hero-status { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  background: rgba(34, 211, 166, 0.18); color: #5eead4; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #22d3a6; }
+.hero-label { margin-top: 16px; color: #b9b5e6; font-size: 14px; }
+.hero-value { font-size: 50px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; }
+.hero-sub { color: #b9b5e6; font-size: 13px; margin-top: 4px; }
+.hero-actions { margin-left: auto; display: flex; flex-direction: column; gap: 10px; width: 240px; }
+.hero-actions button { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.16); color: #fff; box-shadow: none; }
+.hero-actions button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
+.hero-actions button.close { background: #fff; color: #14122b; border-color: #fff; }
+.hero-actions button.close:hover:not(:disabled) { background: #eeecfe; }
+.cash-side { display: flex; flex-direction: column; gap: 18px; }
+.cash-side .kpi { flex: 1; }
+.cash-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 18px; margin-top: 18px; }
+.cash-row .card { margin-top: 0; }
+@media (max-width: 1100px) {
+  .cash-top, .cash-row { grid-template-columns: minmax(0, 1fr); }
+  .cash-hero { flex-direction: column; align-items: stretch; }
+  .hero-actions { margin-left: 0; width: auto; }
+}
+.pay-list { list-style: none; margin: 0; padding: 0; }
+.pay-list li { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.pay-list li:last-child { border-bottom: 0; }
+.pay-name { flex: 1; display: flex; flex-direction: column; }
+</style>

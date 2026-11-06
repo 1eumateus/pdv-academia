@@ -116,6 +116,28 @@ type Product struct {
 	Description *string `json:"description"`
 	// Promo: promoção vigente hoje (só na busca de venda; o backend recalcula ao vender).
 	Promo *ProductPromo `json:"promo"`
+	// Unidade, dados fiscais, localização e fornecedor habitual (ver ProductDetails).
+	Unit       string `json:"unit"`
+	Ncm        string `json:"ncm"`
+	Cest       string `json:"cest"`
+	Cfop       string `json:"cfop"`
+	Origin     string `json:"origin"`
+	Location   string `json:"location"`
+	SupplierID *int64 `json:"supplierId"`
+	// SupplierName: nome do fornecedor habitual (fantasia ou razão social).
+	SupplierName *string `json:"supplierName"`
+}
+
+// ProductDetails: unidade, dados fiscais, localização na loja e fornecedor
+// habitual. Tudo opcional; a unidade padrão é UN.
+type ProductDetails struct {
+	Unit       string `json:"unit"`
+	Ncm        string `json:"ncm"`
+	Cest       string `json:"cest"`
+	Cfop       string `json:"cfop"`
+	Origin     string `json:"origin"` // origem da mercadoria (0 a 8), "" = não informada
+	Location   string `json:"location"`
+	SupplierID *int64 `json:"supplierId"`
 }
 
 // Supplier é usado no cadastro (ID 0 = novo) e nas listagens. Document guarda
@@ -300,6 +322,8 @@ type ProductInput struct {
 	PlanDays *int64 `json:"planDays"`
 	// Description: texto livre; nil mantém o atual na edição.
 	Description *string `json:"description"`
+	// Details: unidade, fiscal, localização e fornecedor; nil mantém os atuais.
+	Details *ProductDetails `json:"details"`
 }
 
 // Subscription é uma assinatura (plano de academia) com a fatura em aberto, se houver.

@@ -209,7 +209,7 @@ async function savePassword() {
       <div class="brand">PDV<small>{{ storeName || 'Ponto de Venda' }}</small></div>
       <nav aria-label="Menu principal">
         <RouterLink v-for="g in groups" :key="g.label" :to="g.tabs[0].to" :class="{ 'router-link-active': g === currentGroup }" :style="{ '--ic': g.color }">
-          <Icon :name="g.icon" :size="22" />{{ g.label }}<span v-if="g.key" class="kbd">{{ g.key }}</span>
+          <Icon :name="g.icon" :size="30" />{{ g.label }}<span v-if="g.key" class="kbd">{{ g.key }}</span>
         </RouterLink>
       </nav>
       <span class="spacer" />
@@ -242,7 +242,7 @@ async function savePassword() {
         </div>
         <nav v-if="currentGroup && currentGroup.tabs.length > 1" class="page-tabs no-print" :aria-label="`Telas de ${currentGroup.label}`" :style="{ '--ic': currentGroup.color }">
           <RouterLink v-for="t in currentGroup.tabs" :key="t.to" :to="t.to" :class="{ active: isActive(t.to) }" :aria-current="isActive(t.to) ? 'page' : undefined">
-            <Icon v-if="t.icon" :name="t.icon" :size="18" />{{ t.label }}
+            <Icon v-if="t.icon" :name="t.icon" :size="24" />{{ t.label }}
           </RouterLink>
         </nav>
         <RouterView v-if="currentUser" />

@@ -7,7 +7,7 @@ import Icon from '../components/Icon.vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   AdjustStock, CreateProduct, DeleteProduct, ListCategories, ListProducts, ListStockMovements,
-  RegisterStockEntry, RegisterStockReturn, SaveCategory, SuggestProductCode, UpdateProduct,
+  ListSuppliers, RegisterStockEntry, RegisterStockReturn, SaveCategory, SuggestProductCode, UpdateProduct,
 } from '../../wailsjs/go/main/App'
 import { call, errorMessage } from '../api'
 import { can } from '../composables/session'
@@ -18,7 +18,7 @@ import ImportModal from '../components/ImportModal.vue'
 import ServicesList from '../components/ServicesList.vue'
 import StockMovements from '../components/StockMovements.vue'
 import Modal from '../components/Modal.vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { exportTable } from '../composables/exportTable'
 import { settings } from '../composables/cashState'
 import { centsToInput, formatDateTime, money, parseMoney, parseQty, stockLevel, stockReasonLabels, today } from '../composables/format'
@@ -27,6 +27,7 @@ import { models, type Category, type Product, type StockMovement } from '../type
 
 const toast = useToast()
 const route = useRoute()
+const router = useRouter()
 const stockMode = computed(() => route.meta.mode === 'estoque')
 const sub = ref<'mercadorias' | 'servicos'>('mercadorias')
 const stockSub = ref<'saldo' | 'historico'>('saldo')
@@ -45,6 +46,18 @@ const noPriceCount = computed(() => products.value.filter((p) => p.active && noP
 // Produto que não controla estoque nunca entra em alerta de reposição.
 const level = (p: Product) => (p.noStock ? 'ok' : stockLevel(p.stockQty, p.minStock, settings.value?.lowStockDefault ?? 0))
 const isLow = (p: Product) => level(p) === 'baixo'
+// Indicadores do topo (só produtos ativos).
+const kpis = computed(() => {
+  const act = products.value.filter((p) => p.active)
+  return {
+    active: act.length,
+    categories: new Set(act.map((p) => p.categoryName ?? '')).size,
+    stockValue: act.reduce((a, p) => a + (p.noStock || p.stockQty <= 0 ? 0 : p.costCents * p.stockQty), 0),
+    low: act.filter(isLow).length,
+    zero: act.filter((p) => level(p) === 'zerado').length,
+  }
+})
+const thumbColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#8b5cf6', '#84cc16', '#f97316', '#14b8a6']
 // margin: % do preço que sobra depois do custo (null sem custo informado).
 function margin(price: number, cost: number): number | null {
   return cost > 0 && price > 0 ? Math.round(((price - cost) / price) * 1000) / 10 : null
@@ -128,15 +141,47 @@ function exportProducts() {
 
 // O aviso de estoque do painel abre direto em "Repor estoque"; trocar entre
 // Produtos e Estoque (mesma tela) volta para "Todos".
-watch(() => route.fullPath, () => (view.value = route.query.view === 'alerta' ? 'alerta' : 'todos'), { immediate: true })
+watch(() => route.fullPath, () => (view.value = route.query.view === 'alerta' || route.query.view === 'zerado' ? route.query.view : 'todos'), { immediate: true })
+// Cards de estoque baixo/sem estoque: na aba Estoque filtram aqui; em Produtos levam para o Estoque.
+function showStock(key: 'alerta' | 'zerado') {
+  if (stockMode.value) view.value = key
+  else router.push(`/estoque?view=${key}`)
+}
 onMounted(() => {
   load()
   loadCategories()
 })
 
 // ---------- cadastro / edição ----------
-const form = reactive({ open: false, id: 0, name: '', barcode: '', sku: '', price: '', active: true, initialStock: '0', categoryId: null as number | null, cost: '', minStock: '0', busy: false, error: '' })
+const form = reactive({
+  open: false, id: 0, name: '', barcode: '', sku: '', price: '', active: true, initialStock: '0', categoryId: null as number | null, cost: '', minStock: '0',
+  // Unidade, fiscal, localização e fornecedor habitual.
+  unit: 'UN', ncm: '', cest: '', cfop: '', origin: '', location: '', supplierId: null as number | null, supplierName: '',
+  busy: false, error: '',
+})
 const formMargin = computed(() => margin(parseMoney(form.price) ?? 0, parseMoney(form.cost) ?? 0))
+const formProfit = computed(() => {
+  const price = parseMoney(form.price)
+  const cost = parseMoney(form.cost)
+  return price && cost ? price - cost : null
+})
+const units = ['UN', 'KG', 'G', 'L', 'ML', 'M', 'CX', 'PCT', 'FD', 'DZ', 'PAR', 'KIT']
+const origins = [
+  ['0', '0 – Nacional'], ['1', '1 – Estrangeira, importação direta'], ['2', '2 – Estrangeira, mercado interno'],
+  ['3', '3 – Nacional, mais de 40% importado'], ['4', '4 – Nacional, processo produtivo básico'], ['5', '5 – Nacional, até 40% importado'],
+  ['6', '6 – Estrangeira, importação direta, sem similar'], ['7', '7 – Estrangeira, mercado interno, sem similar'], ['8', '8 – Nacional, mais de 70% importado'],
+]
+// Fornecedores para o campo "Fornecedor" (a lista exige a permissão de compras).
+const suppliers = ref<models.Supplier[]>([])
+async function loadSuppliers() {
+  if (!can('compras') || suppliers.value.length) return
+  try {
+    suppliers.value = (await call(ListSuppliers(''))).filter((s) => s.active)
+  } catch {
+    // sem a lista, o fornecedor aparece só para leitura
+  }
+}
+const supplierLabel = (s: models.Supplier) => s.tradeName?.trim() || s.legalName
 const belowCost = computed(() => (parseMoney(form.cost) ?? 0) > 0 && (parseMoney(form.price) ?? 0) < (parseMoney(form.cost) ?? 0))
 
 // SKU sugerido no cadastro novo (o código de barras fica em branco); se o usuário
@@ -148,7 +193,10 @@ async function openForm(p?: Product) {
     open: true, id: p?.id ?? 0, name: p?.name ?? '', barcode: p?.barcode ?? '', sku: p?.sku ?? '',
     price: p ? centsToInput(p.priceCents) : '', active: p?.active ?? true, initialStock: '0', categoryId: p?.categoryId ?? null,
     cost: p?.costCents ? centsToInput(p.costCents) : '', minStock: String(p?.minStock ?? 0), busy: false, error: '',
+    unit: p?.unit || 'UN', ncm: p?.ncm ?? '', cest: p?.cest ?? '', cfop: p?.cfop ?? '', origin: p?.origin ?? '', location: p?.location ?? '',
+    supplierId: p?.supplierId ?? null, supplierName: p?.supplierName ?? '',
   })
+  loadSuppliers()
   suggested.value = null
   Object.assign(newCat, { open: false, name: '', busy: false })
   if (p) return
@@ -182,6 +230,9 @@ async function saveForm() {
       // Sem ver_custo o campo nem aparece: manda null para manter o custo gravado.
       costCents: can('ver_custo') ? cost : null, minStock,
       autoSku: !form.id && !!suggested.value && form.sku.trim() === suggested.value.sku,
+      details: {
+        unit: form.unit, ncm: form.ncm, cest: form.cest, cfop: form.cfop, origin: form.origin, location: form.location, supplierId: form.supplierId,
+      },
     })
     const saved = await call( (form.id ? UpdateProduct(input) : CreateProduct(input)))
     toast.success(form.id ? `Produto "${saved.name}" atualizado.` : `Produto "${saved.name}" cadastrado.`)
@@ -320,6 +371,28 @@ const opTitles: Record<StockOp, string> = { entrada: 'Entrada de estoque', ajust
 </script>
 
 <template>
+  <div v-if="!loading && !loadError && (stockMode || sub === 'mercadorias')" class="kpi-row">
+    <div class="kpi">
+      <div class="kpi-head">Produtos ativos<span class="kpi-ic" style="--c: #5b4cf0"><Icon name="m-produtos" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ kpis.active }}</div>
+      <div class="small muted">em {{ kpis.categories }} categoria(s)</div>
+    </div>
+    <div v-if="can('ver_custo')" class="kpi">
+      <div class="kpi-head">Valor em estoque<span class="kpi-ic" style="--c: #0e9466"><Icon name="m-caixa" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ money(kpis.stockValue) }}</div>
+      <div class="small muted">a preço de custo</div>
+    </div>
+    <button type="button" class="kpi kpi-btn" @click="showStock('alerta')">
+      <div class="kpi-head">Estoque baixo<span class="kpi-ic" style="--c: #d98b06"><Icon name="t-estoque" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ kpis.low }}</div>
+      <div class="small"><span class="badge warn">repor em breve</span></div>
+    </button>
+    <button type="button" class="kpi kpi-btn" @click="showStock('zerado')">
+      <div class="kpi-head">Sem estoque<span class="kpi-ic" style="--c: #d63c31"><Icon name="cancelar" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ kpis.zero }}</div>
+      <div class="small"><span class="badge bad">fora da venda</span></div>
+    </button>
+  </div>
   <section class="card stack">
     <div v-if="!stockMode" class="tabs seg" role="tablist" aria-label="Tipo de produto">
       <button role="tab" :aria-selected="sub === 'mercadorias'" @click="sub = 'mercadorias'">Mercadorias</button>
@@ -387,10 +460,11 @@ const opTitles: Record<StockOp, string> = { entrada: 'Entrada de estoque', ajust
         <tbody>
           <tr v-for="p in filtered" :key="p.id" :class="{ inactive: !p.active, 'stock-zerado': stockMode && p.active && level(p) === 'zerado', 'stock-baixo': stockMode && p.active && isLow(p) }">
             <td class="product-cell left">
+              <span class="p-thumb" :style="{ background: thumbColors[p.id % thumbColors.length] }">{{ p.name.trim().slice(0, 2).toUpperCase() }}</span>
               <span class="product-name">{{ p.name }}</span>
               <span v-if="!p.active" class="badge">Inativo</span>
               <button v-if="p.modelId && can('cadastrar_produto')" class="link small" title="Ver e ampliar a grade" @click="grade = p.modelId">grade</button>
-              <div class="product-meta"><template v-if="p.sku">SKU <span class="mono">{{ p.sku }}</span> · </template><template v-if="p.barcode"><span class="mono">{{ p.barcode }}</span> · </template>{{ p.categoryName ?? 'Sem categoria' }}</div>
+              <div class="product-meta"><template v-if="p.sku">SKU <span class="mono">{{ p.sku }}</span> · </template><template v-if="p.barcode"><span class="mono">{{ p.barcode }}</span> · </template>{{ p.categoryName ?? 'Sem categoria' }}<template v-if="p.unit && p.unit !== 'UN'"> · {{ p.unit }}</template><template v-if="p.location"> · {{ p.location }}</template></div>
             </td>
             <template v-if="stockMode">
             <td class="center mono">
@@ -439,18 +513,39 @@ const opTitles: Record<StockOp, string> = { entrada: 'Entrada de estoque', ajust
 
 
   <ImportModal v-if="importOpen" kind="produtos" @close="importOpen = false" @done="load(); loadCategories()" />
-  <Modal v-if="form.open" :title="form.id ? 'Editar produto' : 'Novo produto'" :busy="form.busy" @close="form.open = false">
-    <form class="stack" @submit.prevent="saveForm">
-      <label class="field">Nome<input v-model="form.name" maxlength="200" required /></label>
-      <label class="field">Código de barras (opcional)<input v-model="form.barcode" maxlength="64" /></label>
-      <label class="field">SKU / código interno (opcional)<input v-model="form.sku" maxlength="64" /></label>
+  <Modal v-if="form.open" :title="form.id ? 'Editar produto' : 'Novo produto'" wide :busy="form.busy" @close="form.open = false">
+    <form class="stack pform" @submit.prevent="saveForm">
+      <div class="pform-head">
+        <span class="p-thumb big" :style="{ background: thumbColors[(form.id || 0) % thumbColors.length] }">{{ (form.name.trim() || '?').slice(0, 2).toUpperCase() }}</span>
+        <label class="field" style="flex: 1">Nome do produto<input v-model="form.name" maxlength="200" required /></label>
+      </div>
+
+      <h4>Identificação</h4>
+      <div class="pgrid">
+        <label class="field">Código de barras (opcional)<input v-model="form.barcode" maxlength="64" /></label>
+        <label class="field">SKU / código interno (opcional)<input v-model="form.sku" maxlength="64" /></label>
+        <label class="field">Unidade
+          <select v-model="form.unit">
+            <option v-for="u in units.includes(form.unit) ? units : [form.unit, ...units]" :key="u" :value="u">{{ u }}</option>
+          </select>
+        </label>
+        <label class="field">Categoria
+          <select v-model="form.categoryId">
+            <option :value="null">Sem categoria</option>
+            <option v-for="c in categories.filter((c) => c.active || c.id === form.categoryId)" :key="c.id" :value="c.id">{{ c.name }}</option>
+          </select>
+        </label>
+        <label class="field">Fornecedor
+          <select v-if="can('compras')" v-model="form.supplierId">
+            <option :value="null">Nenhum</option>
+            <option v-if="form.supplierId && !suppliers.some((s) => s.id === form.supplierId)" :value="form.supplierId">{{ form.supplierName || 'Fornecedor atual' }}</option>
+            <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ supplierLabel(s) }}</option>
+          </select>
+          <input v-else :value="form.supplierName || '—'" disabled />
+        </label>
+        <label class="field">Localização na loja<input v-model="form.location" maxlength="100" placeholder="Ex.: Corredor 3 · prateleira B" /></label>
+      </div>
       <p v-if="suggested" class="small muted" style="margin: 0">SKU gerado automaticamente; dá para trocar ou apagar.</p>
-      <label class="field">Categoria (opcional)
-        <select v-model="form.categoryId">
-          <option :value="null">Sem categoria</option>
-          <option v-for="c in categories.filter((c) => c.active || c.id === form.categoryId)" :key="c.id" :value="c.id">{{ c.name }}</option>
-        </select>
-      </label>
       <div v-if="newCat.open" class="row" style="gap: 6px; flex-wrap: nowrap">
         <input v-model="newCat.name" maxlength="80" placeholder="Nome da nova categoria" aria-label="Nome da nova categoria" style="flex: 1"
           @keydown.enter.prevent="addCategory" />
@@ -458,14 +553,34 @@ const opTitles: Record<StockOp, string> = { entrada: 'Entrada de estoque', ajust
         <button type="button" :disabled="newCat.busy" @click="newCat.open = false">Cancelar</button>
       </div>
       <button v-else-if="can('cadastrar_produto')" type="button" class="link small" style="align-self: start" @click="newCat.open = true">+ Nova categoria</button>
-      <div class="grid grid-2">
+
+      <h4>Preço e estoque</h4>
+      <div class="pgrid">
         <label v-if="can('ver_custo')" class="field">Preço de custo (R$)<input v-model="form.cost" inputmode="decimal" placeholder="0,00" /></label>
         <label v-if="!form.id || can('alterar_preco')" class="field">Preço de venda (R$)<input v-model="form.price" inputmode="decimal" placeholder="0,00" required /></label>
+        <div v-if="can('ver_custo')" class="field">Margem
+          <div class="margin-box" :class="{ bad: belowCost }">
+            <template v-if="formMargin != null">{{ formMargin }}%<span v-if="formProfit != null">&nbsp;· lucro {{ money(formProfit) }}</span></template>
+            <template v-else>—</template>
+          </div>
+        </div>
         <label v-if="!form.id" class="field">Estoque inicial<input v-model="form.initialStock" inputmode="numeric" /></label>
         <label class="field">Estoque mínimo (aviso de reposição)<input v-model="form.minStock" inputmode="numeric" /></label>
       </div>
-      <p v-if="can('ver_custo') && formMargin != null" class="small muted" style="margin: 0">Margem: <strong>{{ formMargin }}%</strong> do preço de venda.</p>
       <div v-if="can('ver_custo') && belowCost" class="alert warn" role="alert">Atenção: o preço de venda está abaixo do custo.</div>
+
+      <h4>Fiscal <span class="small muted">(opcional)</span></h4>
+      <div class="pgrid">
+        <label class="field">NCM<input v-model="form.ncm" maxlength="10" inputmode="numeric" placeholder="0000.00.00" /></label>
+        <label class="field">CEST<input v-model="form.cest" maxlength="9" inputmode="numeric" placeholder="00.000.00" /></label>
+        <label class="field">CFOP<input v-model="form.cfop" maxlength="4" inputmode="numeric" placeholder="5102" /></label>
+        <label class="field origin">Origem da mercadoria
+          <select v-model="form.origin">
+            <option value="">Não informada</option>
+            <option v-for="[v, l] in origins" :key="v" :value="v">{{ l }}</option>
+          </select>
+        </label>
+      </div>
       <label v-if="can('ativar_produto')" class="check"><input v-model="form.active" type="checkbox" /> Produto ativo (disponível para venda)</label>
       <p v-if="form.id" class="small muted">Para alterar o estoque, use a aba Estoque (Entrada, Ajuste ou Devolução). Vendas anteriores mantêm o nome e o preço da época.</p>
       <div v-if="form.error" class="alert error" role="alert">{{ form.error }}</div>
@@ -530,3 +645,17 @@ const opTitles: Record<StockOp, string> = { entrada: 'Entrada de estoque', ajust
   <GradeModal v-if="grade !== undefined" :model-id="grade" :categories="categories" @close="grade = undefined" @changed="load" />
   <CategoriesModal v-if="showCategories" :categories="categories" @close="showCategories = false" @changed="loadCategories(); load()" />
 </template>
+
+<style scoped>
+/* Formulário do produto em seções (identificação, preço e estoque, fiscal). */
+.pform h4 { margin: 8px 0 0; padding-bottom: 6px; font-size: 13.5px; border-bottom: 1px solid var(--border); }
+.pform-head { display: flex; align-items: flex-end; gap: 14px; }
+.p-thumb.big { float: none; width: 56px; height: 56px; margin: 0; border-radius: 14px; font-size: 18px; flex-shrink: 0; }
+.pgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.pgrid .origin { grid-column: span 3; }
+@media (max-width: 700px) { .pgrid { grid-template-columns: minmax(0, 1fr); } .pgrid .origin { grid-column: auto; } }
+div.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.margin-box { min-height: 40px; display: flex; align-items: center; padding: 0 12px; border-radius: var(--radius-sm); font-weight: 700;
+  background: var(--success-soft); color: var(--success); }
+.margin-box.bad { background: var(--danger-soft); color: var(--danger); }
+</style>

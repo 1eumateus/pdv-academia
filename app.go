@@ -332,6 +332,11 @@ func (a *App) SetupAdmin(in models.UserInput) (models.Session, error) {
 	})
 }
 
+// ListLoginUsers: os usuários ativos, para a tela de login mostrar quem pode entrar.
+func (a *App) ListLoginUsers() ([]models.User, error) {
+	return callAnon(a, "listar usuários do login", func(ctx context.Context) ([]models.User, error) { return a.auth.ListLoginUsers(ctx) })
+}
+
 // Login entra com o usuário; force encerra a sessão dele em outro lugar
 // (depois de a tela confirmar o aviso USUARIO_JA_LOGADO).
 func (a *App) Login(login, password string, force bool) (models.Session, error) {

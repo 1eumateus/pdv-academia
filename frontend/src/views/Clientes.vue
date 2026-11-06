@@ -2,17 +2,19 @@
 <script setup lang="ts">
 import Icon from '../components/Icon.vue'
 import { computed, onMounted, ref, watch } from 'vue'
-import { DeleteCustomer, ListCustomers, SetCustomerActive } from '../../wailsjs/go/main/App'
+import { DeleteCustomer, GetCustomerHistory, ListCustomers, SetCustomerActive } from '../../wailsjs/go/main/App'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CustomerFormModal from '../components/CustomerFormModal.vue'
 import PurgeCustomerDialog from '../components/PurgeCustomerDialog.vue'
 import { call, errorMessage } from '../api'
 import { exportTable } from '../composables/exportTable'
 import { can } from '../composables/session'
-import { formatDocument } from '../composables/format'
+import { formatDate, formatDateTime, formatDocument, money, paymentLabels } from '../composables/format'
 import { birthdayInfo, sendMessage } from '../composables/messages'
+import { openWhatsapp } from '../composables/charge'
+import { storeName } from '../composables/cashState'
 import { useToast } from '../composables/toast'
-import { type Customer } from '../types'
+import { type Customer, type models } from '../types'
 
 const toast = useToast()
 const customers = ref<Customer[]>([])
@@ -33,6 +35,8 @@ const birthdays = computed(() => {
     .sort((a, b) => (period.value === 'mes' ? Number(a.c.birthDate!.slice(8)) - Number(b.c.birthDate!.slice(8)) : a.days - b.days))
 })
 const ddmm = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`
+// A lista (com a ficha ao lado) aparece quando a aba tem alguém para mostrar.
+const showList = computed(() => (sub.value === 'aniversariantes' ? birthdays.value.length > 0 : !loadError.value && customers.value.length > 0))
 const loading = ref(true)
 const loadError = ref('')
 let timer: number | undefined
@@ -68,6 +72,7 @@ function purged() {
   const c = purgeAsk.value!
   purgeAsk.value = null
   customers.value = customers.value.filter((x) => x.id !== c.id)
+  if (selectedId.value === c.id) selectedId.value = null
 }
 async function remove() {
   const c = deleteAsk.value!
@@ -92,6 +97,43 @@ function openForm(c?: Customer) {
   editing.value = c ?? null
 }
 
+// WhatsApp: abre a conversa com uma saudação já escrita (o operador completa e envia).
+function talk(c: Customer) {
+  const first = c.name.trim().split(/\s+/)[0] ?? ''
+  openWhatsapp(c.phone ?? '', `Olá, ${first}! Aqui é da ${storeName.value || 'loja'}.`)
+}
+
+// ---------- ficha ao lado da lista ----------
+// selected: cliente clicado na lista; history: as compras e o fiado dele.
+const selectedId = ref<number | null>(null)
+const selected = computed(() => customers.value.find((c) => c.id === selectedId.value) ?? null)
+const history = ref<models.CustomerHistory | null>(null)
+const historyLoading = ref(false)
+async function select(c: Customer) {
+  selectedId.value = c.id
+  history.value = null
+  historyLoading.value = true
+  try {
+    const h = await call(GetCustomerHistory(c.id))
+    if (selectedId.value === c.id) history.value = h
+  } catch (e) {
+    toast.error(errorMessage(e))
+  } finally {
+    historyLoading.value = false
+  }
+}
+const done = computed(() => (history.value?.sales ?? []).filter((s) => s.status !== 'cancelada'))
+const totalBought = computed(() => done.value.reduce((a, s) => a + s.totalCents, 0))
+const lastSale = computed(() => done.value.reduce<models.Sale | null>((a, s) => (!a || s.createdAt > a.createdAt ? s : a), null))
+const lateNotes = computed(() => (history.value?.notes ?? []).filter((n) => n.openCents > 0 && n.daysOpen > 30).length)
+function address(c: Customer) {
+  const street = [c.street, c.number].filter(Boolean).join(', ')
+  return [street, c.complement, c.district, [c.city, c.state].filter(Boolean).join('/')].filter(Boolean).join(' · ')
+}
+const avatarColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#8b5cf6', '#84cc16', '#f97316', '#14b8a6']
+const avatar = (c: Customer) => ({ background: avatarColors[c.id % avatarColors.length] })
+const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((w) => w.charAt(0)).join('').toUpperCase()
+
 </script>
 
 <template>
@@ -109,22 +151,6 @@ function openForm(c?: Customer) {
         </div>
       </div>
       <div v-if="!birthdays.length" class="state">Nenhum aniversariante {{ period === 'hoje' ? 'hoje' : period === 'semana' ? 'nos próximos 7 dias' : 'este mês' }}. Cadastre a data de nascimento no cliente.</div>
-      <div v-else class="table-wrap">
-        <table>
-          <thead><tr><th>Cliente</th><th>Aniversário</th><th class="right">Faz</th><th>Telefone</th><th class="right">Ações</th></tr></thead>
-          <tbody>
-            <tr v-for="b in birthdays" :key="b.c.id">
-              <td>{{ b.c.name }}</td>
-              <td>{{ ddmm(b.c.birthDate!) }} <span v-if="b.days === 0" class="badge ok">hoje</span><span v-else-if="b.days < 7" class="small muted">em {{ b.days }} dia(s)</span></td>
-              <td class="right mono">{{ b.age }} anos</td>
-              <td>{{ b.c.phone || '—' }}</td>
-              <td class="right actions-cell">
-                <button class="link icon-btn" style="color: var(--success)" title="Mandar parabéns pelo WhatsApp" aria-label="Parabéns no WhatsApp" @click="sendMessage('msgBirthday', b.c.phone, { nome: b.c.name })"><Icon name="whatsapp" /><span>Parabéns</span></button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
     </template>
     <template v-else>
     <div class="row">
@@ -136,22 +162,41 @@ function openForm(c?: Customer) {
     <div v-if="loading && customers.length === 0" class="state">Carregando clientes…</div>
     <div v-else-if="loadError" class="alert error">{{ loadError }} <button class="link" @click="load">Tentar novamente</button></div>
     <div v-else-if="customers.length === 0" class="state">{{ term ? 'Nenhum cliente encontrado.' : 'Nenhum cliente cadastrado.' }}</div>
-    <div v-else class="table-wrap">
-      <table>
+    </template>
+    <!-- Lista (todos ou aniversariantes) e a ficha do cliente clicado ao lado. -->
+    <div v-if="showList" class="cust-split" :class="{ solo: sub === 'aniversariantes' }">
+    <div class="table-wrap cust-list">
+      <table v-if="sub === 'aniversariantes'" class="left-table">
+        <thead><tr><th>Cliente</th><th>Aniversário</th><th>Telefone</th><th class="right">Ações</th></tr></thead>
+        <tbody>
+          <tr v-for="b in birthdays" :key="b.c.id">
+            <td><div class="cust-cell"><span class="avatar" :style="avatar(b.c)">{{ initials(b.c.name) }}</span>
+              <span>{{ b.c.name }}<small class="muted">faz {{ b.age }} anos</small></span></div></td>
+            <td class="nowrap">{{ ddmm(b.c.birthDate!) }} <span v-if="b.days === 0" class="badge ok">hoje</span><span v-else-if="b.days < 7" class="small muted">em {{ b.days }} dia(s)</span></td>
+            <td class="nowrap">{{ b.c.phone || '—' }}</td>
+            <td class="right actions-cell">
+              <button class="link icon-btn whats" :disabled="!b.c.phone" :title="b.c.phone ? 'Mandar parabéns pelo WhatsApp' : 'Cadastre o celular do cliente para chamar no WhatsApp'"
+                aria-label="Parabéns no WhatsApp" @click="sendMessage('msgBirthday', b.c.phone, { nome: b.c.name })"><Icon name="whatsapp" /><span>Parabéns</span></button>
+              <button class="link icon-btn" @click="openForm(b.c)" title="Editar" aria-label="Editar"><Icon name="edit" /><span>Editar</span></button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <table v-else class="left-table">
         <thead>
-          <tr><th>Cliente</th><th>Telefone</th><th>CPF/CNPJ</th><th>Cidade</th><th>Nascimento</th><th>Situação</th><th class="right">Ações</th></tr>
+          <tr><th>Cliente</th><th>Telefone</th><th>Situação</th><th class="right">Ações</th></tr>
         </thead>
         <tbody>
-          <tr v-for="c in customers" :key="c.id" :class="{ inactive: !c.active }">
-            <td class="left">{{ c.name }}</td>
-            <td>{{ c.phone || '—' }}</td>
-            <td class="mono small">{{ formatDocument(c.document) || '—' }}</td>
-            <td>{{ c.city || '—' }}<span v-if="c.district" class="small muted"> · {{ c.district }}</span></td>
-            <td class="nowrap">{{ c.birthDate ? c.birthDate.split('-').reverse().join('/') : '—' }}</td>
+          <tr v-for="c in customers" :key="c.id" class="clickable" :class="{ inactive: !c.active, selected: c.id === selectedId }" @click="select(c)">
+            <td><div class="cust-cell"><span class="avatar" :style="avatar(c)">{{ initials(c.name) }}</span>
+              <span>{{ c.name }}<small v-if="c.city" class="muted">{{ c.city }}<template v-if="c.district"> · {{ c.district }}</template></small></span></div></td>
+            <td class="nowrap">{{ c.phone || '—' }}</td>
             <td><span class="badge" :class="c.active ? 'ok' : ''">{{ c.active ? 'Ativo' : 'Inativo' }}</span></td>
-            <td class="right actions-cell">
+            <td class="right actions-cell" @click.stop>
+              <button class="link icon-btn whats" :disabled="!c.phone" :title="c.phone ? `Abrir conversa com ${c.name} no WhatsApp` : 'Cadastre o celular do cliente para chamar no WhatsApp'"
+                aria-label="Chamar no WhatsApp" @click="talk(c)"><Icon name="whatsapp" /><span>WhatsApp</span></button>
               <button class="link icon-btn" @click="openForm(c)" title="Editar" aria-label="Editar"><Icon name="edit" /><span>Editar</span></button>
-              <button class="link icon-btn" :style="c.active ? '' : 'color: var(--success)'" :title="c.active ? 'Inativar: não compra a prazo e a catraca nega' : 'Ativar o cliente'"
+              <button class="link icon-btn" :style="c.active ? '' : 'color: var(--success)'" :title="c.active ? 'Inativar: não compra a prazo' : 'Ativar o cliente'"
                 :aria-label="c.active ? 'Inativar' : 'Ativar'" @click="toggleActive(c)"><Icon :name="c.active ? 'desativar' : 'ativar'" /><span>{{ c.active ? 'Inativar' : 'Ativar' }}</span></button>
               <button class="link icon-btn" style="color: var(--danger)" :title="canPurge ? 'Excluir de vez, com todo o histórico' : 'Excluir de vez (só cliente sem histórico)'" aria-label="Excluir" @click="canPurge ? (purgeAsk = c) : (deleteAsk = c)"><Icon name="remover" /><span>Excluir</span></button>
             </td>
@@ -159,15 +204,99 @@ function openForm(c?: Customer) {
         </tbody>
       </table>
     </div>
-    <p class="small muted">{{ canPurge ? 'Excluir apaga o cliente com todo o histórico (vendas, fiado, mensalidades): confira antes.' : 'Clientes com histórico não podem ser excluídos: use Inativar.' }} Compras a prazo, cobrança e vale-troca ficam em Financeiro › A prazo.</p>
-    </template>
+    <aside v-if="sub === 'todos'" class="cust-detail">
+      <div v-if="!selected" class="state">Clique num cliente para ver a ficha, o saldo a prazo e as compras.</div>
+      <template v-else>
+        <div class="detail-head">
+          <span class="avatar big" :style="avatar(selected)">{{ initials(selected.name) }}</span>
+          <div class="detail-id">
+            <strong>{{ selected.name }}</strong>
+            <span class="small muted">
+              <template v-if="selected.document">{{ formatDocument(selected.document) }} · </template>{{ selected.phone || 'sem telefone' }}<template v-if="selected.email"> · {{ selected.email }}</template>
+            </span>
+            <span v-if="address(selected)" class="small muted">{{ address(selected) }}</span>
+            <span v-if="selected.birthDate" class="small muted">Aniversário {{ ddmm(selected.birthDate) }}</span>
+          </div>
+          <button @click="openForm(selected)"><Icon name="edit" /> Editar</button>
+        </div>
+        <div class="detail-kpis">
+          <div class="kpi">
+            <div class="kpi-head">Em aberto</div>
+            <div class="kpi-value mono" :style="{ color: selected.creditBalanceCents > 0 ? 'var(--danger)' : '' }">{{ money(selected.creditBalanceCents) }}</div>
+            <div class="small muted">{{ lateNotes ? `${lateNotes} nota(s) há mais de 30 dias` : 'a prazo' }}</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head">Limite de crédito</div>
+            <div class="kpi-value mono">{{ selected.creditLimitCents ? money(selected.creditLimitCents) : '—' }}</div>
+            <div v-if="selected.creditLimitCents" class="bar"><i :style="{ width: `${Math.min(100, (selected.creditBalanceCents / selected.creditLimitCents) * 100)}%` }" /></div>
+            <div v-else class="small muted">sem limite definido</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head">Total comprado</div>
+            <div class="kpi-value mono">{{ history ? money(totalBought) : '…' }}</div>
+            <div class="small muted">{{ done.length }} compra(s)</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-head">Última compra</div>
+            <div class="kpi-value">{{ lastSale ? formatDate(lastSale.createdAt) : '—' }}</div>
+            <div v-if="selected.storeCreditCents > 0" class="small"><span class="badge ok">vale-troca {{ money(selected.storeCreditCents) }}</span></div>
+          </div>
+        </div>
+        <div class="card-head" style="margin: 4px 0 0"><strong>Histórico de compras</strong>
+          <router-link v-if="selected.creditBalanceCents > 0" to="/fiado" class="small">Receber em A prazo</router-link></div>
+        <div v-if="historyLoading" class="state">Carregando…</div>
+        <div v-else-if="!history?.sales.length" class="state">Nenhuma compra registrada.</div>
+        <div v-else class="table-wrap detail-sales">
+          <table class="left-table">
+            <thead><tr><th>Venda</th><th>Data</th><th>Itens</th><th>Pagamento</th><th class="num">Total</th></tr></thead>
+            <tbody>
+              <tr v-for="s in history.sales" :key="s.id" :class="{ inactive: s.status === 'cancelada' }">
+                <td class="mono">nº {{ s.id }}</td>
+                <td class="nowrap">{{ formatDateTime(s.createdAt) }}</td>
+                <td class="items">{{ s.itemsLabel || '—' }}</td>
+                <td><span class="badge" :class="s.paymentMethod === 'fiado' ? 'bad' : ''">{{ paymentLabels[s.paymentMethod] ?? s.paymentMethod }}</span></td>
+                <td class="num mono"><strong>{{ money(s.totalCents) }}</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+    </aside>
+    </div>
+    <p v-if="sub === 'todos'" class="small muted">{{ canPurge ? 'Excluir apaga o cliente com todo o histórico (vendas, fiado): confira antes.' : 'Clientes com histórico não podem ser excluídos: use Inativar.' }} Compras a prazo, cobrança e vale-troca ficam em Financeiro › A prazo.</p>
   </section>
 
   <ConfirmDialog v-if="deleteAsk" title="Excluir cliente" danger
-    :message="`Excluir ${deleteAsk.name} de vez? Só é possível para quem não tem vendas, fiado, assinaturas nem passagens na catraca; para os outros, use Inativar.`"
+    :message="`Excluir ${deleteAsk.name} de vez? Só é possível para quem não tem vendas nem fiado; para os outros, use Inativar.`"
     confirm-label="Excluir" cancel-label="Voltar" @confirm="remove" @cancel="deleteAsk = null" />
 
   <PurgeCustomerDialog v-if="purgeAsk" :customer-id="purgeAsk.id" :name="purgeAsk.name" @done="purged" @close="purgeAsk = null" />
-
-  <CustomerFormModal v-if="editing !== undefined" :customer="editing" @close="editing = undefined" @saved="editing = undefined; load()" />
+  <CustomerFormModal v-if="editing !== undefined" :customer="editing" @close="editing = undefined" @saved="editing = undefined; load(); selected && select(selected)" />
 </template>
+
+<style scoped>
+/* Lista à esquerda, ficha do cliente selecionado à direita. */
+.cust-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 18px; align-items: start; }
+@media (max-width: 1200px) { .cust-split { grid-template-columns: minmax(0, 1fr); } }
+.cust-list { max-height: calc(100vh - 290px); overflow: auto; }
+/* Aniversariantes: só a lista, na largura toda (sem a ficha ao lado). */
+.cust-split.solo { grid-template-columns: minmax(0, 1fr); }
+.cust-cell { display: flex; align-items: center; gap: 12px; }
+.cust-cell small { display: block; font-size: 12px; }
+.avatar { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; color: #fff; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+.avatar.big { width: 64px; height: 64px; border-radius: 18px; font-size: 22px; }
+.cust-detail { display: flex; flex-direction: column; gap: 16px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); min-height: 320px; }
+.detail-head { display: flex; align-items: flex-start; gap: 16px; }
+.detail-id { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.detail-id strong { font-size: 20px; letter-spacing: -0.01em; }
+.detail-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.detail-kpis .kpi { padding: 14px 16px; box-shadow: none; }
+.detail-kpis .kpi-value { font-size: 22px; }
+.bar { height: 8px; border-radius: 8px; background: var(--surface-2); overflow: hidden; margin-top: 4px; }
+.bar i { display: block; height: 100%; border-radius: 8px; background: var(--primary); }
+.detail-sales { max-height: 340px; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.detail-sales .items { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Botão do WhatsApp em verde, como o do aplicativo. */
+.icon-btn.whats { color: #128c4b; }
+.icon-btn.whats:disabled { color: var(--muted); }
+</style>

@@ -194,6 +194,8 @@ export function ListGateMembers(arg1:string):Promise<Array<models.GateMember>>;
 
 export function ListGateStaff():Promise<Array<models.GateMember>>;
 
+export function ListLoginUsers():Promise<Array<models.User>>;
+
 export function ListOpenCash():Promise<Array<models.CashSession>>;
 
 export function ListOpenComandas():Promise<Array<models.Comanda>>;

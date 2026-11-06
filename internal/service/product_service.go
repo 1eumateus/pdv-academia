@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"slices"
 	"strings"
+	"time"
 
 	"pdv/internal/actor"
 	"pdv/internal/models"
@@ -111,8 +112,76 @@ func samePlan(a, b *int64) bool { return (a == nil) == (b == nil) && (a == nil |
 
 // Create cadastra o produto. O estoque inicial, se houver, é registrado como
 // movimentação de entrada na mesma transação.
+// cleanDetails valida unidade, fiscal e localização (nil mantém os atuais).
+// NCM, CEST e CFOP aceitam pontos ("0901.21.00"), mas guardam só os dígitos.
+func cleanDetails(in *models.ProductInput) error {
+	d := in.Details
+	if d == nil {
+		return nil
+	}
+	digits := func(label, v string, n int) (string, error) {
+		v = strings.NewReplacer(".", "", "-", "", " ", "").Replace(v)
+		if v == "" {
+			return "", nil
+		}
+		if len(v) != n || strings.Trim(v, "0123456789") != "" {
+			return "", invalid("O %s deve ter %d números.", label, n)
+		}
+		return v, nil
+	}
+	var err error
+	if d.Ncm, err = digits("NCM", d.Ncm, 8); err != nil {
+		return err
+	}
+	if d.Cest, err = digits("CEST", d.Cest, 7); err != nil {
+		return err
+	}
+	if d.Cfop, err = digits("CFOP", d.Cfop, 4); err != nil {
+		return err
+	}
+	d.Unit = strings.ToUpper(strings.TrimSpace(d.Unit))
+	if d.Unit == "" {
+		d.Unit = "UN"
+	}
+	if len([]rune(d.Unit)) > 6 {
+		return invalid("A unidade deve ter no máximo 6 letras (ex.: UN, KG, CX).")
+	}
+	d.Origin = strings.TrimSpace(d.Origin)
+	if d.Origin != "" && (len(d.Origin) != 1 || d.Origin < "0" || d.Origin > "8") {
+		return invalid("A origem da mercadoria vai de 0 a 8.")
+	}
+	d.Location = strings.TrimSpace(d.Location)
+	if len([]rune(d.Location)) > 100 {
+		return invalid("A localização deve ter no máximo 100 caracteres.")
+	}
+	if d.SupplierID != nil && *d.SupplierID <= 0 {
+		d.SupplierID = nil
+	}
+	return nil
+}
+
+// saveDetails grava os dados extras do produto (o fornecedor precisa existir).
+func (s *ProductService) saveDetails(ctx context.Context, tx *sql.Tx, id int64, d *models.ProductDetails, now time.Time) error {
+	if d == nil {
+		return nil
+	}
+	if d.SupplierID != nil {
+		var ok bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM suppliers WHERE id = ?)`, *d.SupplierID).Scan(&ok); err != nil {
+			return err
+		}
+		if !ok {
+			return invalid("Fornecedor não encontrado.")
+		}
+	}
+	return s.products.SetDetails(ctx, tx, id, *d, now)
+}
+
 func (s *ProductService) Create(ctx context.Context, in models.ProductInput) (models.Product, error) {
 	if err := cleanPlan(&in); err != nil {
+		return models.Product{}, err
+	}
+	if err := cleanDetails(&in); err != nil {
 		return models.Product{}, err
 	}
 	f, err := validateProduct(in)
@@ -178,6 +247,9 @@ func (s *ProductService) Create(ctx context.Context, in models.ProductInput) (mo
 				return err
 			}
 		}
+		if err := s.saveDetails(ctx, tx, id, in.Details, now); err != nil {
+			return err
+		}
 		if in.InitialStock > 0 {
 			if err := applyStockChange(ctx, tx, now, repository.NewMovement{
 				ProductID: id, QtyChange: in.InitialStock, Reason: models.StockEntry,
@@ -196,6 +268,9 @@ func (s *ProductService) Create(ctx context.Context, in models.ProductInput) (mo
 // aqui; vendas antigas mantêm nome e preço do momento da venda.
 func (s *ProductService) Update(ctx context.Context, in models.ProductInput) (models.Product, error) {
 	if err := cleanPlan(&in); err != nil {
+		return models.Product{}, err
+	}
+	if err := cleanDetails(&in); err != nil {
 		return models.Product{}, err
 	}
 	f, err := validateProduct(in)
@@ -262,6 +337,9 @@ func (s *ProductService) Update(ctx context.Context, in models.ProductInput) (mo
 			if err := s.products.SetDescription(ctx, tx, in.ID, trimPtr(in.Description), s.Now()); err != nil {
 				return err
 			}
+		}
+		if err := s.saveDetails(ctx, tx, in.ID, in.Details, s.Now()); err != nil {
+			return err
 		}
 		out, err = s.products.GetByID(ctx, tx, in.ID)
 		return err

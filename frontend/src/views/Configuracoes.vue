@@ -1,4 +1,4 @@
-<!-- Caminho: pdv/frontend/src/views/Configuracoes.vue -->
+<!-- Caminho: catraca/frontend/src/views/Configuracoes.vue -->
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import {
@@ -209,10 +209,13 @@ async function cancelRestore() {
           <textarea v-model="form.chargeMessage" rows="3" maxlength="1000" />
           <span class="small muted">Use {nome} (primeiro nome do cliente), {saldo} (valor em aberto) e {loja} (nome da loja).</span>
         </label>
+        <label class="field">Mensagem de parabéns aos aniversariantes (WhatsApp)
+          <textarea v-model="form.msgBirthday" rows="2" maxlength="1000" />
+          <span class="small muted">Use {nome} (primeiro nome do cliente) e {loja}. O operador confere e envia.</span>
+        </label>
         <details class="msgs">
-          <summary><strong>Mensagens do WhatsApp: aniversário e assinaturas</strong></summary>
+          <summary><strong>Mensagens do WhatsApp da academia (mensalidades)</strong></summary>
           <p class="small muted">Use {nome} (primeiro nome), {plano}, {vencimento}, {valor} e {loja}. O operador confere e envia.</p>
-          <label class="field">Parabéns (aniversariantes)<textarea v-model="form.msgBirthday" rows="2" maxlength="1000" /></label>
           <div class="grid grid-2">
             <label class="field">Mensalidade a vencer<textarea v-model="form.msgDue" rows="3" maxlength="1000" /></label>
             <label class="field">Mensalidade vencida<textarea v-model="form.msgOverdue" rows="3" maxlength="1000" /></label>
@@ -388,4 +391,17 @@ async function cancelRestore() {
 .msgs { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
 .msgs summary { cursor: pointer; }
 .msgs[open] summary { margin-bottom: 8px; }
+/* Títulos de cada bloco com uma linha embaixo, como seções de um formulário. */
+.card h2 { font-size: 17px; font-weight: 650; }
+.card h3 { font-size: 14px; font-weight: 650; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+/* Opções liga/desliga: a caixinha vira um interruptor (o comportamento é o mesmo do checkbox). */
+label.check { padding: 6px 0; }
+label.check input[type='checkbox'] { appearance: none; -webkit-appearance: none; flex-shrink: 0; width: 38px; height: 22px; margin: 0; border-radius: 999px;
+  background: var(--field-border); position: relative; cursor: pointer; transition: background 0.15s; }
+label.check input[type='checkbox']::after { content: ''; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff;
+  transition: left 0.15s; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
+label.check input[type='checkbox']:checked { background: var(--primary); }
+label.check input[type='checkbox']:checked::after { left: 19px; }
+label.check input[type='checkbox']:focus-visible { outline: 3px solid var(--accent-light, #a99ffb); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { label.check input[type='checkbox'], label.check input[type='checkbox']::after { transition: none; } }
 </style>

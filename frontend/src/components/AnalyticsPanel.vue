@@ -15,6 +15,8 @@ import { formatDateTime, money, today } from '../composables/format'
 import type { AnalyticsKind, ReportFilters } from '../composables/reportFilters'
 import { can } from '../composables/session'
 import type { models } from '../types'
+import BarList, { type BarItem } from './BarList.vue'
+import DonutChart from './DonutChart.vue'
 import ReportSheet from './ReportSheet.vue'
 
 const props = defineProps<{ kind: AnalyticsKind; filters: ReportFilters; title: string }>()
@@ -69,6 +71,69 @@ const stockTotal = computed(() => stock.value.reduce((a, r) => ({ qty: a.qty + r
 const idleCost = computed(() => idle.value.reduce((a, p) => a + p.stockQty * p.costCents, 0))
 const abcCount = (c: string) => abc.value?.rows.filter((r) => r.class === c).length ?? 0
 
+// ---------- gráficos (só na tela) ----------
+const classColor: Record<string, string> = { A: '#0e9466', B: '#d98b06', C: '#94a3b8' }
+// Curva ABC: % de produtos e % da receita de cada classe.
+const abcShares = computed(() => {
+  const rows = abc.value?.rows ?? []
+  const total = abc.value?.totalCents || 1
+  return ['A', 'B', 'C'].map((c) => {
+    const list = rows.filter((r) => r.class === c)
+    return { c, products: rows.length ? (list.length / rows.length) * 100 : 0, revenue: (list.reduce((a, r) => a + r.revenueCents, 0) / total) * 100 }
+  })
+})
+// Curva de Pareto: o acumulado da receita, produto a produto (do que mais vende ao que menos vende).
+const PW = 900
+const PH = 200
+const pareto = computed(() => {
+  const rows = abc.value?.rows ?? []
+  if (!rows.length) return null
+  const n = rows.length
+  const x = (i: number) => (n === 1 ? PW : (i / (n - 1)) * PW)
+  const y = (pct: number) => PH - (pct / 100) * PH
+  const line = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(r.cumulativePct).toFixed(1)}`).join(' ')
+  // Faixas de cada classe no eixo X (do primeiro ao último produto da classe).
+  const bands = ['A', 'B', 'C'].map((c) => {
+    const idx = rows.map((r, i) => (r.class === c ? i : -1)).filter((i) => i >= 0)
+    if (!idx.length) return null
+    const from = idx[0] === 0 ? 0 : (x(idx[0] - 1) + x(idx[0])) / 2
+    const to = idx[idx.length - 1] === n - 1 ? PW : (x(idx[idx.length - 1]) + x(idx[idx.length - 1] + 1)) / 2
+    return { c, from, to, count: idx.length }
+  }).filter((b) => b !== null)
+  return { line, area: `${line} L${PW},${PH} L0,${PH} Z`, bands, y80: y(80), y95: y(95) }
+})
+// Parados: os 10 com mais dinheiro parado (ou mais unidades, para quem não vê custo).
+const idleBars = computed<BarItem[]>(() => {
+  const byCost = can('ver_custo')
+  return [...idle.value]
+    .sort((a, b) => (byCost ? b.stockQty * b.costCents - a.stockQty * a.costCents : b.stockQty - a.stockQty))
+    .slice(0, 10)
+    .map((p) => ({
+      key: p.productId, label: p.name, value: byCost ? p.stockQty * p.costCents : p.stockQty,
+      text: byCost ? money(p.stockQty * p.costCents) : `${p.stockQty} un.`,
+      sub: `${p.stockQty} un. · ${p.idleDays < 0 ? 'nunca vendeu' : `parado há ${p.idleDays} dias`}`,
+      color: p.idleDays < 0 || p.idleDays > 90 ? '#d63c31' : '#d98b06',
+    }))
+})
+const idleByCategory = computed(() => {
+  const m = new Map<string, number>()
+  for (const p of idle.value) m.set(p.categoryName || 'Sem categoria', (m.get(p.categoryName || 'Sem categoria') ?? 0) + p.stockQty)
+  return [...m].map(([name, value]) => ({ name, value, text: `${value} un.` }))
+})
+// Descontos: quanto cada operador deu e a soma de desconto e promoção.
+const discountBars = computed<BarItem[]>(() => [...discounts.value].sort((a, b) => b.discountCents - a.discountCents).map((d) => ({
+  key: d.userName, label: d.userName, value: d.discountCents, text: money(d.discountCents),
+  sub: `${pct(d.discountCents, d.subtotalCents)} do vendido · ${d.salesWithDiscount} de ${d.sales} vendas`,
+})))
+const discountTotals = computed(() => discounts.value.reduce((a, d) => ({ discount: a.discount + d.discountCents, promo: a.promo + d.promoCents }), { discount: 0, promo: 0 }))
+const shortMoney = (cents: number) => (cents >= 100000 ? `R$ ${(cents / 100000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : money(cents))
+
+// Lucro: os 10 que mais deram lucro no período.
+const profitBars = computed<BarItem[]>(() => [...profitRows.value].sort((a, b) => b.profitCents - a.profitCents).slice(0, 10).map((r) => ({
+  key: r.productId || r.name, label: r.name, value: r.profitCents, text: money(r.profitCents),
+  sub: `margem ${pct(r.profitCents, r.revenueCents)}`, color: r.profitCents < 0 ? '#d63c31' : '#0e9466',
+})))
+
 // Exportação: a mesma tabela da tela, com os números crus para o Excel somar.
 function exportCurrent() {
   const frac = (part: number, whole: number) => (whole ? part / whole : '')
@@ -117,6 +182,10 @@ defineExpose({ load, exportXlsx: exportCurrent, print, pdf: () => savePdf(sheet.
           <div class="stat"><div class="label">Lucro bruto</div><div class="value mono" :style="{ color: profit.profitCents < 0 ? 'var(--danger)' : 'var(--success)' }">{{ money(profit.profitCents) }}</div></div>
           <div class="stat"><div class="label">Margem</div><div class="value mono">{{ pct(profit.profitCents, profit.revenueCents) }}</div></div>
         </div>
+        <section v-if="profitRows.length" class="chart-box no-print">
+          <div class="card-head"><strong>10 que mais deram lucro ({{ profitBy === 'produto' ? 'produtos' : 'categorias' }})</strong></div>
+          <BarList :items="profitBars" />
+        </section>
         <div class="row no-print">
           <div class="tabs seg" role="tablist" aria-label="Agrupar lucro">
             <button role="tab" :aria-selected="profitBy === 'produto'" @click="profitBy = 'produto'">Por produto</button>
@@ -151,6 +220,32 @@ defineExpose({ load, exportXlsx: exportCurrent, print, pdf: () => savePdf(sheet.
           <div class="stat"><div class="label">Classe B (próximos 15%)</div><div class="value mono">{{ abcCount('B') }} produto(s)</div></div>
           <div class="stat"><div class="label">Classe C (últimos 5%)</div><div class="value mono">{{ abcCount('C') }} produto(s)</div></div>
         </div>
+        <div v-if="pareto" class="charts no-print">
+          <section class="chart-box">
+            <div class="card-head"><strong>Curva ABC</strong><span class="small muted">receita acumulada, do produto que mais vende ao que menos vende</span></div>
+            <svg :viewBox="`-44 -10 ${PW + 54} ${PH + 40}`" class="pareto" role="img" aria-label="Curva ABC">
+              <rect v-for="b in pareto.bands" :key="b.c" :x="b.from" y="0" :width="Math.max(1, b.to - b.from)" :height="PH" :fill="classColor[b.c]" opacity="0.1" />
+              <text v-for="b in pareto.bands" :key="`t${b.c}`" :x="(b.from + b.to) / 2" :y="PH + 22" text-anchor="middle" class="tick strong" :fill="classColor[b.c]">
+                {{ b.c }} · {{ b.count }}</text>
+              <line v-for="g in [0, 25, 50, 75, 100]" :key="g" x1="0" :x2="PW" :y1="PH - (g / 100) * PH" :y2="PH - (g / 100) * PH" class="grid" />
+              <text v-for="g in [0, 25, 50, 75, 100]" :key="`g${g}`" x="-8" :y="PH - (g / 100) * PH + 4" text-anchor="end" class="tick">{{ g }}%</text>
+              <line x1="0" :x2="PW" :y1="pareto.y80" :y2="pareto.y80" class="limit" />
+              <line x1="0" :x2="PW" :y1="pareto.y95" :y2="pareto.y95" class="limit" />
+              <path :d="pareto.area" class="area" />
+              <path :d="pareto.line" class="line" />
+            </svg>
+          </section>
+          <section class="chart-box">
+            <div class="card-head"><strong>Quanto cada classe representa</strong></div>
+            <div v-for="s in abcShares" :key="s.c" class="share">
+              <div class="share-head"><span class="badge" :style="{ background: classColor[s.c], color: '#fff' }">{{ s.c }}</span>
+                <span class="small muted">{{ s.products.toFixed(0) }}% dos produtos → {{ s.revenue.toFixed(0) }}% da receita</span></div>
+              <div class="share-bar"><i class="p" :style="{ width: `${s.products}%` }" /></div>
+              <div class="share-bar"><i :style="{ width: `${s.revenue}%`, background: classColor[s.c] }" /></div>
+            </div>
+            <p class="small muted" style="margin: 8px 0 0"><span class="key p" /> produtos &nbsp; <span class="key" /> receita</p>
+          </section>
+        </div>
         <div v-if="!abc.rows.length" class="state">Nenhuma venda no período.</div>
         <table v-else>
           <thead><tr><th>Classe</th><th class="left">Produto</th><th class="right">Qtd.</th><th class="right">Receita</th><th class="right">Participação</th><th class="right">Acumulado</th></tr></thead>
@@ -174,6 +269,17 @@ defineExpose({ load, exportXlsx: exportCurrent, print, pdf: () => savePdf(sheet.
           <div class="stat"><div class="label">Produtos parados</div><div class="value mono">{{ idle.length }}</div></div>
           <div class="stat"><div class="label">Unidades paradas</div><div class="value mono">{{ idle.reduce((a, p) => a + p.stockQty, 0) }}</div></div>
           <div v-if="can('ver_custo')" class="stat"><div class="label">Dinheiro parado (a custo)</div><div class="value mono">{{ money(idleCost) }}</div></div>
+        </div>
+        <div v-if="idle.length" class="charts no-print">
+          <section class="chart-box">
+            <div class="card-head"><strong>{{ can('ver_custo') ? 'Mais dinheiro parado' : 'Mais unidades paradas' }}</strong>
+              <span class="small muted"><span class="key red" /> nunca vendeu ou +90 dias &nbsp; <span class="key amber" /> até 90 dias</span></div>
+            <BarList :items="idleBars" />
+          </section>
+          <section class="chart-box">
+            <div class="card-head"><strong>Unidades paradas por categoria</strong></div>
+            <DonutChart :items="idleByCategory" center-label="unidades" :center="String(idle.reduce((a, p) => a + p.stockQty, 0))" />
+          </section>
         </div>
         <div v-if="!idle.length" class="state">Nenhum produto com estoque parado há {{ days }} dias ou mais.</div>
         <table v-else>
@@ -269,6 +375,18 @@ defineExpose({ load, exportXlsx: exportCurrent, print, pdf: () => savePdf(sheet.
 
       <!-- Descontos por operador -->
       <template v-else-if="tab === 'descontos'">
+        <div v-if="discounts.length" class="charts no-print">
+          <section class="chart-box">
+            <div class="card-head"><strong>Desconto dado por operador</strong><span class="small muted">em R$ e % do que vendeu</span></div>
+            <BarList :items="discountBars" color="#d98b06" />
+          </section>
+          <section class="chart-box">
+            <div class="card-head"><strong>Desconto × promoção</strong></div>
+            <DonutChart :items="[{ name: 'Desconto do operador', value: discountTotals.discount, text: money(discountTotals.discount) },
+              { name: 'Promoções automáticas', value: discountTotals.promo, text: money(discountTotals.promo) }]"
+              center-label="total" :center="shortMoney(discountTotals.discount + discountTotals.promo)" />
+          </section>
+        </div>
         <div v-if="!discounts.length" class="state">Nenhuma venda no período.</div>
         <table v-else>
           <thead><tr><th>Operador</th><th class="right">Vendas</th><th class="right">Com desconto</th><th class="right">Subtotal</th><th class="right">Desconto dado</th><th class="right">% do subtotal</th><th class="right">Promoções</th></tr></thead>
@@ -293,4 +411,23 @@ defineExpose({ load, exportXlsx: exportCurrent, print, pdf: () => savePdf(sheet.
 
 <style scoped>
 .seg { margin: 0; border-bottom: 0; }
+/* Gráficos (só na tela), acima das tabelas. */
+.charts { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 18px; }
+@media (max-width: 1100px) { .charts { grid-template-columns: minmax(0, 1fr); } }
+.chart-box { padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.pareto { width: 100%; height: auto; display: block; }
+.pareto .grid { stroke: var(--border); stroke-dasharray: 4 4; }
+.pareto .limit { stroke: var(--muted); stroke-dasharray: 2 4; opacity: 0.6; }
+.pareto .tick { font-size: 12px; fill: var(--muted); }
+.pareto .tick.strong { font-weight: 700; }
+.pareto .line { fill: none; stroke: var(--primary); stroke-width: 3; stroke-linejoin: round; }
+.pareto .area { fill: var(--primary); opacity: 0.08; }
+.share + .share { margin-top: 14px; }
+.share-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.share-bar { height: 9px; border-radius: 9px; background: var(--surface-2); overflow: hidden; margin-top: 4px; }
+.share-bar i { display: block; height: 100%; border-radius: 9px; }
+.share-bar i.p, .key.p { background: #c7c2f8; }
+.key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--muted); vertical-align: middle; }
+.key.red { background: #d63c31; }
+.key.amber { background: #d98b06; }
 </style>

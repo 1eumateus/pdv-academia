@@ -80,7 +80,49 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 	if err := ensureSubscriptionExempt(ctx, conn); err != nil {
 		return err
 	}
-	return ensureCustomerGender(ctx, conn)
+	if err := ensureCustomerGender(ctx, conn); err != nil {
+		return err
+	}
+	return ensureProductDetails(ctx, conn)
+}
+
+// productDetailColumns: unidade de venda, dados fiscais (NCM, CEST, CFOP,
+// origem), onde fica na loja e o fornecedor habitual. Tudo opcional. No PDV
+// genérico isso é a migration 38; aqui o 38 já é a troca de pagamento, então
+// cada coluna é criada se faltar.
+var productDetailColumns = []struct{ name, ddl string }{
+	{"unit", `ALTER TABLE products ADD COLUMN unit TEXT NOT NULL DEFAULT 'UN'`},
+	{"ncm", `ALTER TABLE products ADD COLUMN ncm TEXT NOT NULL DEFAULT ''`},
+	{"cest", `ALTER TABLE products ADD COLUMN cest TEXT NOT NULL DEFAULT ''`},
+	{"cfop", `ALTER TABLE products ADD COLUMN cfop TEXT NOT NULL DEFAULT ''`},
+	{"origin", `ALTER TABLE products ADD COLUMN origin TEXT NOT NULL DEFAULT ''`},
+	{"location", `ALTER TABLE products ADD COLUMN location TEXT NOT NULL DEFAULT ''`},
+	{"supplier_id", `ALTER TABLE products ADD COLUMN supplier_id INTEGER REFERENCES suppliers (id)`},
+}
+
+// ensureProductDetails cria as colunas extras do produto que faltarem, numa transação.
+func ensureProductDetails(ctx context.Context, conn *sql.DB) error {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("dados extras do produto: %w", err)
+	}
+	defer tx.Rollback()
+	for _, c := range productDetailColumns {
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('products') WHERE name = ?`, c.name).Scan(&n); err != nil {
+			return fmt.Errorf("dados extras do produto: %w", err)
+		}
+		if n > 0 {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, c.ddl); err != nil {
+			return fmt.Errorf("dados extras do produto (%s): %w", c.name, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("dados extras do produto: %w", err)
+	}
+	return nil
 }
 
 // ensureCustomerGender cria o gênero do cliente, se faltar (nulo = não informado).

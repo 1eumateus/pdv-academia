@@ -386,6 +386,10 @@ export function ListGateStaff() {
   return window['go']['main']['App']['ListGateStaff']();
 }
 
+export function ListLoginUsers() {
+  return window['go']['main']['App']['ListLoginUsers']();
+}
+
 export function ListOpenCash() {
   return window['go']['main']['App']['ListOpenCash']();
 }

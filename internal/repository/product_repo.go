@@ -15,8 +15,10 @@ type ProductRepo struct{}
 
 // productSelect já traz o nome da categoria; filtros usam o prefixo p.
 const productSelect = `SELECT p.id, p.name, p.barcode, p.price_cents, p.stock_qty, p.active, p.created_at, p.updated_at,
-	p.category_id, c.name, p.model_id, pm.name, p.size, p.color, p.cost_cents, p.min_stock, p.price_pending, p.sku, p.track_stock, p.plan_days, p.description
-	FROM products p LEFT JOIN categories c ON c.id = p.category_id LEFT JOIN product_models pm ON pm.id = p.model_id`
+	p.category_id, c.name, p.model_id, pm.name, p.size, p.color, p.cost_cents, p.min_stock, p.price_pending, p.sku, p.track_stock, p.plan_days, p.description,
+	p.unit, p.ncm, p.cest, p.cfop, p.origin, p.location, p.supplier_id, COALESCE(NULLIF(trim(sp.trade_name), ''), sp.legal_name)
+	FROM products p LEFT JOIN categories c ON c.id = p.category_id LEFT JOIN product_models pm ON pm.id = p.model_id
+	LEFT JOIN suppliers sp ON sp.id = p.supplier_id`
 
 // ProductFields são os dados cadastrais já validados pelo serviço.
 type ProductFields struct {
@@ -45,12 +47,16 @@ func scanProduct(s interface{ Scan(...any) error }) (models.Product, error) {
 		track            int
 		planDays         sql.NullInt64
 		description      sql.NullString
+		supplierID       sql.NullInt64
+		supplierName     sql.NullString
 		created, updated string
 		err              error
 	)
-	if err = s.Scan(&p.ID, &p.Name, &barcode, &p.PriceCents, &p.StockQty, &active, &created, &updated, &catID, &catName, &modelID, &modelName, &p.Size, &p.Color, &p.CostCents, &p.MinStock, &pending, &sku, &track, &planDays, &description); err != nil {
+	if err = s.Scan(&p.ID, &p.Name, &barcode, &p.PriceCents, &p.StockQty, &active, &created, &updated, &catID, &catName, &modelID, &modelName, &p.Size, &p.Color, &p.CostCents, &p.MinStock, &pending, &sku, &track, &planDays, &description,
+		&p.Unit, &p.Ncm, &p.Cest, &p.Cfop, &p.Origin, &p.Location, &supplierID, &supplierName); err != nil {
 		return p, err
 	}
+	p.SupplierID, p.SupplierName = nullInt(supplierID), nullStr(supplierName)
 	p.Barcode, p.Sku = nullStr(barcode), nullStr(sku)
 	p.CategoryID, p.CategoryName = nullInt(catID), nullStr(catName)
 	p.ModelID, p.ModelName = nullInt(modelID), nullStr(modelName)
@@ -161,6 +167,14 @@ func (ProductRepo) SetPrice(ctx context.Context, q DBTX, id, price int64, now ti
 func (ProductRepo) SetNoStock(ctx context.Context, q DBTX, id int64, noStock bool, now time.Time) error {
 	_, err := q.ExecContext(ctx, `UPDATE products SET track_stock = ?, updated_at = ? WHERE id = ?`, boolInt(!noStock), FormatTime(now), id)
 	return wrap("alterar controle de estoque", err)
+}
+
+// SetDetails grava unidade, dados fiscais, localização e fornecedor habitual.
+func (ProductRepo) SetDetails(ctx context.Context, q DBTX, id int64, d models.ProductDetails, now time.Time) error {
+	_, err := q.ExecContext(ctx,
+		`UPDATE products SET unit = ?, ncm = ?, cest = ?, cfop = ?, origin = ?, location = ?, supplier_id = ?, updated_at = ? WHERE id = ?`,
+		d.Unit, d.Ncm, d.Cest, d.Cfop, d.Origin, d.Location, d.SupplierID, FormatTime(now), id)
+	return wrap("gravar dados do produto", err)
 }
 
 // SetDescription grava a descrição livre (nil apaga).

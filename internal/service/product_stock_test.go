@@ -43,6 +43,39 @@ func TestProductCreateAndUpdate(t *testing.T) {
 	}
 }
 
+func TestProductDetails(t *testing.T) {
+	e := newEnv(t)
+	sup, err := NewSupplierService(NewBase(e.db)).Save(e.ctx, models.Supplier{LegalName: "Distribuidora Sol LTDA", TradeName: "Distribuidora Sol"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := e.products.Create(e.ctx, models.ProductInput{Name: "Café 500g", PriceCents: 1890, Active: true,
+		Details: &models.ProductDetails{Unit: " pct ", Ncm: "0901.21.00", Cest: "17.096.00", Cfop: "5102", Origin: "0", Location: " Corredor 3 ", SupplierID: &sup.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Unit != "PCT" || p.Ncm != "09012100" || p.Cest != "1709600" || p.Cfop != "5102" || p.Origin != "0" || p.Location != "Corredor 3" ||
+		p.SupplierID == nil || *p.SupplierID != sup.ID || p.SupplierName == nil || *p.SupplierName != "Distribuidora Sol" {
+		t.Fatalf("dados do produto gravados errado: %+v", p)
+	}
+	// Sem Details na edição, os dados ficam como estão.
+	p2, err := e.products.Update(e.ctx, models.ProductInput{ID: p.ID, Name: p.Name, PriceCents: p.PriceCents, Active: true})
+	if err != nil || p2.Ncm != "09012100" || p2.Unit != "PCT" {
+		t.Fatalf("edição sem Details apagou os dados: %v %+v", err, p2)
+	}
+	// Produto antigo/sem dados: unidade padrão UN.
+	q, err := e.products.Create(e.ctx, models.ProductInput{Name: "Sabonete", PriceCents: 300, Active: true})
+	if err != nil || q.Unit != "UN" || q.SupplierID != nil {
+		t.Fatalf("padrões errados: %v %+v", err, q)
+	}
+	missing := int64(999)
+	for _, d := range []models.ProductDetails{{Ncm: "123"}, {Cest: "12a4567"}, {Cfop: "51020"}, {Origin: "9"}, {Unit: "UNIDADES"}, {SupplierID: &missing}} {
+		if _, err := e.products.Create(e.ctx, models.ProductInput{Name: "X", PriceCents: 100, Active: true, Details: &d}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%+v: esperado erro de validação, veio %v", d, err)
+		}
+	}
+}
+
 func TestProductValidation(t *testing.T) {
 	e := newEnv(t)
 	cases := []models.ProductInput{

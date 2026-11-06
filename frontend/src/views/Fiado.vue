@@ -7,6 +7,7 @@ import { useRoute } from 'vue-router'
 import { GetCustomerHistory, GetFiadoAging, ReverseCreditPayment } from '../../wailsjs/go/main/App'
 import { call, errorMessage } from '../api'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import BarList, { type BarItem } from '../components/BarList.vue'
 import Icon from '../components/Icon.vue'
 import ReceiptModal from '../components/ReceiptModal.vue'
 import ReceiveCreditModal from '../components/ReceiveCreditModal.vue'
@@ -80,6 +81,20 @@ const shownDebtors = computed(() => {
   return t ? debtors.value.filter((d) => fold(`${d.name} ${d.phone ?? ''}`).includes(t)) : debtors.value
 })
 const totals = computed(() => debtors.value.reduce((a, d) => ({ balance: a.balance + d.balanceCents, over: a.over + d.over90Cents }), { balance: 0, over: 0 }))
+// Gráficos: o saldo por faixa de atraso e os 6 maiores devedores (a cor diz a nota mais antiga).
+const aging = computed(() => {
+  const sum = (k: 'upto30Cents' | 'upto60Cents' | 'upto90Cents' | 'over90Cents') => debtors.value.reduce((a, d) => a + d[k], 0)
+  return [
+    { label: 'Até 30 dias', cents: sum('upto30Cents'), color: '#0e9466' },
+    { label: '31 a 60 dias', cents: sum('upto60Cents'), color: '#d98b06' },
+    { label: '61 a 90 dias', cents: sum('upto90Cents'), color: '#ea580c' },
+    { label: 'Mais de 90 dias', cents: sum('over90Cents'), color: '#d63c31' },
+  ]
+})
+const topDebtors = computed<BarItem[]>(() => [...debtors.value].sort((a, b) => b.balanceCents - a.balanceCents).slice(0, 6).map((d) => ({
+  key: d.customerId, label: d.name, value: d.balanceCents, text: money(d.balanceCents), sub: `nota mais antiga: ${d.oldestDays} dia(s)`,
+  color: d.oldestDays > 90 ? '#d63c31' : d.oldestDays > 30 ? '#d98b06' : '#0e9466',
+})))
 
 const notes = computed(() => {
   const all = [...(history.value?.notes ?? [])].reverse() // mais recentes primeiro
@@ -128,10 +143,39 @@ function exportNotes() {
 </script>
 
 <template>
-  <div class="grid grid-4" style="margin-bottom: 16px">
-    <div class="stat"><div class="label">A receber</div><div class="value mono">{{ money(totals.balance) }}</div></div>
-    <div class="stat"><div class="label">Clientes devendo</div><div class="value mono">{{ debtors.length }}</div></div>
-    <div class="stat"><div class="label">Há mais de 90 dias</div><div class="value mono" :style="{ color: totals.over ? 'var(--danger)' : '' }">{{ money(totals.over) }}</div></div>
+  <div class="kpi-row">
+    <div class="kpi">
+      <div class="kpi-head">A receber<span class="kpi-ic" style="--c: #0e9466"><Icon name="receber" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ money(totals.balance) }}</div>
+      <div class="small muted">soma das notas em aberto</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-head">Clientes devendo<span class="kpi-ic" style="--c: #5b4cf0"><Icon name="m-clientes" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ debtors.length }}</div>
+      <div class="small muted">com saldo a prazo</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-head">Há mais de 90 dias<span class="kpi-ic" style="--c: #d63c31"><Icon name="historico" :size="18" /></span></div>
+      <div class="kpi-value mono" :style="{ color: totals.over ? 'var(--danger)' : '' }">{{ money(totals.over) }}</div>
+      <div class="small"><span class="badge" :class="totals.over ? 'bad' : 'ok'">{{ totals.over ? 'cobrar com prioridade' : 'nada atrasado' }}</span></div>
+    </div>
+  </div>
+
+  <div v-if="debtors.length" class="fiado-charts">
+    <section class="card">
+      <div class="card-head"><strong>Há quanto tempo está em aberto</strong><span class="small muted">{{ money(totals.balance) }} no total</span></div>
+      <div class="aging-bar">
+        <i v-for="a in aging" :key="a.label" :style="{ width: `${totals.balance ? (a.cents / totals.balance) * 100 : 0}%`, background: a.color }" :title="`${a.label}: ${money(a.cents)}`" />
+      </div>
+      <ul class="aging-legend">
+        <li v-for="a in aging" :key="a.label"><i :style="{ background: a.color }" /><span>{{ a.label }}</span>
+          <strong class="mono">{{ money(a.cents) }}</strong><span class="small muted">{{ totals.balance ? Math.round((a.cents / totals.balance) * 100) : 0 }}%</span></li>
+      </ul>
+    </section>
+    <section class="card">
+      <div class="card-head"><strong>Maiores saldos</strong></div>
+      <BarList :items="topDebtors" />
+    </section>
   </div>
 
   <div class="fiado">
@@ -251,6 +295,15 @@ function exportNotes() {
 
 <style scoped>
 .charge-btn { display: inline-flex; align-items: center; gap: 6px; }
+.fiado-charts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; margin-bottom: 18px; }
+@media (max-width: 1100px) { .fiado-charts { grid-template-columns: minmax(0, 1fr); } }
+.fiado-charts .card { margin-top: 0; }
+.aging-bar { display: flex; height: 22px; border-radius: 11px; overflow: hidden; background: var(--surface-2); }
+.aging-bar i { display: block; height: 100%; }
+.aging-legend { list-style: none; margin: 14px 0 0; padding: 0; }
+.aging-legend li { display: grid; grid-template-columns: 12px 1fr auto 44px; align-items: center; gap: 10px; padding: 6px 0; font-size: 14px; }
+.aging-legend li > i { width: 12px; height: 12px; border-radius: 3px; }
+.aging-legend li > span:last-child { text-align: right; }
 .fiado { display: grid; grid-template-columns: minmax(260px, 0.75fr) minmax(0, 1.6fr); gap: 16px; align-items: start; }
 .fiado > .card { margin-top: 0; }
 .debtors { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius); max-height: 60vh; overflow-y: auto; }

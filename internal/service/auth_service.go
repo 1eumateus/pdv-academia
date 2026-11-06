@@ -670,6 +670,19 @@ func salesScope(ctx context.Context, requested int64) int64 {
 	return u.ID
 }
 
+// ListLoginUsers lista os usuários ativos para a tela de login escolher quem
+// entra (sem sessão). Só nome, login e perfil: nada de permissões nem senha.
+func (s *AuthService) ListLoginUsers(ctx context.Context) ([]models.User, error) {
+	list, err := s.users.List(ctx, s.DB)
+	out := make([]models.User, 0, len(list))
+	for _, u := range list {
+		if u.Active {
+			out = append(out, models.User{ID: u.ID, Name: u.Name, Login: u.Login, Role: u.Role, Active: true})
+		}
+	}
+	return out, err
+}
+
 // ListSellers lista nome e id dos usuários para o filtro por operador.
 func (s *AuthService) ListSellers(ctx context.Context) ([]models.User, error) {
 	if salesScope(ctx, 0) != 0 {

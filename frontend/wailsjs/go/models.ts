@@ -2401,6 +2401,14 @@ export namespace models {
 	    planDays?: number;
 	    description?: string;
 	    promo?: ProductPromo;
+	    unit: string;
+	    ncm: string;
+	    cest: string;
+	    cfop: string;
+	    origin: string;
+	    location: string;
+	    supplierId?: number;
+	    supplierName?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Product(source);
@@ -2430,6 +2438,14 @@ export namespace models {
 	        this.planDays = source["planDays"];
 	        this.description = source["description"];
 	        this.promo = this.convertValues(source["promo"], ProductPromo);
+	        this.unit = source["unit"];
+	        this.ncm = source["ncm"];
+	        this.cest = source["cest"];
+	        this.cfop = source["cfop"];
+	        this.origin = source["origin"];
+	        this.location = source["location"];
+	        this.supplierId = source["supplierId"];
+	        this.supplierName = source["supplierName"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2464,6 +2480,30 @@ export namespace models {
 	        this.barcode = source["barcode"];
 	    }
 	}
+	export class ProductDetails {
+	    unit: string;
+	    ncm: string;
+	    cest: string;
+	    cfop: string;
+	    origin: string;
+	    location: string;
+	    supplierId?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProductDetails(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.unit = source["unit"];
+	        this.ncm = source["ncm"];
+	        this.cest = source["cest"];
+	        this.cfop = source["cfop"];
+	        this.origin = source["origin"];
+	        this.location = source["location"];
+	        this.supplierId = source["supplierId"];
+	    }
+	}
 	export class ProductInput {
 	    id: number;
 	    name: string;
@@ -2480,6 +2520,7 @@ export namespace models {
 	    noStock: boolean;
 	    planDays?: number;
 	    description?: string;
+	    details?: ProductDetails;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProductInput(source);
@@ -2502,7 +2543,26 @@ export namespace models {
 	        this.noStock = source["noStock"];
 	        this.planDays = source["planDays"];
 	        this.description = source["description"];
+	        this.details = this.convertValues(source["details"], ProductDetails);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ProductModel {
 	    id: number;

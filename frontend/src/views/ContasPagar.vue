@@ -9,6 +9,7 @@ import {
 } from '../../wailsjs/go/main/App'
 import { call, errorMessage } from '../api'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import DonutChart from '../components/DonutChart.vue'
 import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
 import { centsToInput, money, parseMoney, today } from '../composables/format'
@@ -38,6 +39,41 @@ const filtered = computed(() => {
   return bills.value.filter((b) => test(b) && (!t || `${b.description} ${b.payee} ${b.category}`.toLowerCase().includes(t)))
 })
 const openTotal = computed(() => filtered.value.filter((b) => b.status === 'aberta').reduce((a, b) => a + b.amountCents, 0))
+
+// Indicadores do topo: vencidas, vencem hoje e o que vence nos próximos 30 dias.
+function sumOf(list: Bill[]) {
+  return { count: list.length, cents: list.reduce((a, b) => a + b.amountCents, 0) }
+}
+const in30 = (() => {
+  const d = new Date()
+  d.setDate(d.getDate() + 30)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})()
+const openBills = computed(() => bills.value.filter((b) => b.status === 'aberta'))
+const overdue = computed(() => sumOf(openBills.value.filter((b) => b.dueDate < today())))
+const dueToday = computed(() => sumOf(openBills.value.filter((b) => b.dueDate === today())))
+const next30 = computed(() => sumOf(openBills.value.filter((b) => b.dueDate >= today() && b.dueDate <= in30)))
+
+// Gráfico por semana: vencidas, esta semana e as próximas 4 (o resto junto em "depois").
+const plusDays = (n: number) => {
+  const d = new Date()
+  d.setDate(d.getDate() + n)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+const weeks = computed(() => {
+  const open = openBills.value
+  const slot = (label: string, color: string, test: (b: Bill) => boolean) => ({ label, color, ...sumOf(open.filter(test)) })
+  const out = [slot('Vencidas', '#d63c31', (b) => b.dueDate < today())]
+  for (let w = 0; w < 5; w++) {
+    const from = plusDays(w * 7)
+    const to = plusDays(w * 7 + 6)
+    const br = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`
+    out.push(slot(w === 0 ? 'Próx. 7 dias' : `${br(from)}–${br(to)}`, w === 0 ? '#d98b06' : '#5b4cf0', (b) => b.dueDate >= from && b.dueDate <= to))
+  }
+  out.push(slot('Depois', '#94a3b8', (b) => b.dueDate > plusDays(34)))
+  return out
+})
+const weeksMax = computed(() => Math.max(1, ...weeks.value.map((w) => w.cents)))
 
 // Resumo do mês: o que foi pago por categoria.
 const month = ref(today().slice(0, 7))
@@ -210,6 +246,39 @@ async function remove() {
 </script>
 
 <template>
+  <div v-if="!loading && !error" class="kpi-row">
+    <button type="button" class="kpi kpi-btn" @click="view = 'vencidas'">
+      <div class="kpi-head">Vencidas<span class="kpi-ic" style="--c: #d63c31"><Icon name="cancelar" :size="18" /></span></div>
+      <div class="kpi-value mono" :style="{ color: overdue.count ? 'var(--danger)' : '' }">{{ money(overdue.cents) }}</div>
+      <div class="small muted">{{ overdue.count }} conta(s)</div>
+    </button>
+    <button type="button" class="kpi kpi-btn" @click="view = 'avencer'">
+      <div class="kpi-head">Vencem hoje<span class="kpi-ic" style="--c: #d98b06"><Icon name="historico" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ money(dueToday.cents) }}</div>
+      <div class="small muted">{{ dueToday.count }} conta(s)</div>
+    </button>
+    <button type="button" class="kpi kpi-btn" @click="view = 'avencer'">
+      <div class="kpi-head">Próximos 30 dias<span class="kpi-ic" style="--c: #5b4cf0"><Icon name="t-orcamento" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ money(next30.cents) }}</div>
+      <div class="small muted">{{ next30.count }} conta(s)</div>
+    </button>
+    <div class="kpi">
+      <div class="kpi-head">Pago no mês<span class="kpi-ic" style="--c: #0e9466"><Icon name="receber" :size="18" /></span></div>
+      <div class="kpi-value mono">{{ money(summary.reduce((a, s) => a + s.totalCents, 0)) }}</div>
+      <div class="small muted">{{ summary.reduce((a, s) => a + s.count, 0) }} conta(s) paga(s)</div>
+    </div>
+  </div>
+  <section v-if="!loading && !error && openBills.length" class="card" style="margin-bottom: 18px">
+    <div class="card-head"><strong>A pagar nas próximas semanas</strong><span class="small muted">contas em aberto, pela data de vencimento</span></div>
+    <div class="weeks">
+      <div v-for="w in weeks" :key="w.label" class="week" :title="`${w.count} conta(s): ${money(w.cents)}`">
+        <span class="w-val mono">{{ w.cents ? money(w.cents) : '—' }}</span>
+        <span class="w-bar"><i :style="{ height: `${(w.cents / weeksMax) * 100}%`, background: w.color }" /></span>
+        <span class="w-label">{{ w.label }}</span>
+        <span class="w-count small muted">{{ w.count }} conta(s)</span>
+      </div>
+    </div>
+  </section>
   <section class="card stack">
     <div class="row">
       <input v-model="term" type="search" placeholder="Buscar conta, favorecido ou categoria" aria-label="Buscar contas" style="max-width: 360px" />
@@ -262,7 +331,9 @@ async function remove() {
       <input v-model="month" type="month" aria-label="Mês" style="max-width: 180px" @change="loadSummary" />
     </div>
     <div v-if="!summary.length" class="state">Nenhuma conta paga neste mês.</div>
-    <table v-else>
+    <DonutChart v-if="summary.length" class="no-print" :items="summary.map((s) => ({ name: s.category, value: s.totalCents, text: money(s.totalCents) }))"
+      center-label="contas pagas" :center="String(summary.reduce((a, s) => a + s.count, 0))" />
+    <table v-if="summary.length">
       <thead><tr><th>Categoria</th><th>Contas</th><th>Total pago</th></tr></thead>
       <tbody>
         <tr v-for="s in summary" :key="s.category"><td class="left">{{ s.category }}</td><td>{{ s.count }}</td><td class="mono">{{ money(s.totalCents) }}</td></tr>
@@ -352,4 +423,11 @@ async function remove() {
 
 <style scoped>
 .barcode { word-break: break-all; }
+/* Colunas por semana: altura proporcional ao valor a pagar. */
+.weeks { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 14px; align-items: end; }
+.week { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.w-val { font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.w-bar { width: 100%; max-width: 70px; height: 150px; display: flex; align-items: flex-end; border-radius: 10px; background: var(--surface-2); overflow: hidden; }
+.w-bar i { display: block; width: 100%; border-radius: 10px 10px 0 0; min-height: 2px; }
+.w-label { font-size: 12.5px; font-weight: 600; text-align: center; }
 </style>

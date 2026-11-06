@@ -22,6 +22,11 @@ import { models, type Comanda, type ComandaDetails, type Customer, type PaymentM
 
 const toast = useToast()
 const list = ref<Comanda[]>([])
+// Tempo desde a abertura, para o card da comanda ("45 min", "2h10").
+function since(openedAt: string) {
+  const min = Math.max(0, Math.round((Date.now() - new Date(openedAt).getTime()) / 60000))
+  return min < 60 ? `${min} min` : `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}`
+}
 const loading = ref(true)
 const loadError = ref('')
 const current = ref<ComandaDetails | null>(null)
@@ -207,19 +212,17 @@ async function discard() {
       <div v-if="loading && list.length === 0" class="state">Carregando…</div>
       <div v-else-if="loadError" class="alert error">{{ loadError }}</div>
       <div v-else-if="list.length === 0" class="state">Nenhuma comanda aberta.</div>
-      <div v-else class="table-wrap">
-        <table>
-          <thead><tr><th>Comanda</th><th>Aberta em</th><th class="right">Itens</th><th class="right">Total</th></tr></thead>
-          <tbody>
-            <tr v-for="c in list" :key="c.id" :class="{ selected: current?.comanda.id === c.id }">
-              <td><button class="link" @click="select(c.id)">{{ c.tableNo }}</button></td>
-              <td class="nowrap">{{ formatDateTime(c.openedAt) }}</td>
-              <td class="right mono">{{ c.itemCount }}</td>
-              <td class="right mono">{{ money(c.totalCents) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <template v-else>
+        <div class="tabs-sum small muted">{{ list.length }} comanda(s) aberta(s) · <strong class="mono">{{ money(list.reduce((a, c) => a + c.totalCents, 0)) }}</strong> em consumo</div>
+        <div class="cmd-grid">
+          <button v-for="c in list" :key="c.id" type="button" class="cmd" :class="{ active: current?.comanda.id === c.id }" @click="select(c.id)"
+            :title="`Aberta em ${formatDateTime(c.openedAt)}`">
+            <span class="cmd-top"><strong class="cmd-no">{{ c.tableNo }}</strong><span class="badge acc">Aberta</span></span>
+            <span class="cmd-meta small muted">{{ since(c.openedAt) }} · {{ c.itemCount }} item(ns)</span>
+            <strong class="cmd-total mono">{{ money(c.totalCents) }}</strong>
+          </button>
+        </div>
+      </template>
     </section>
 
     <section v-if="current" class="card stack" :aria-label="`Comanda ${current.comanda.tableNo}`">
@@ -287,3 +290,16 @@ async function discard() {
   />
   <PixModal v-if="pixClose":amount-cents="pixClose.amount" :txid="`COMANDA${current?.comanda.id ?? ''}`" @received="pixReceived" @cancel="pixClose = null" />
 </template>
+
+<style scoped>
+/* Comandas abertas em cards (estilo mesas); a selecionada fica com a borda índigo. */
+.cmd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
+.cmd { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-height: 140px; padding: 16px; text-align: left; font-weight: 400;
+  border: 1.5px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: 0 4px 16px rgba(17, 24, 39, 0.05); }
+.cmd:hover:not(:disabled) { background: var(--surface); border-color: var(--primary); }
+.cmd.active { border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-soft); }
+.cmd-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.cmd-no { font-size: 22px; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-total { margin-top: auto; font-size: 20px; }
+.tabs-sum { margin-top: -2px; }
+</style>
