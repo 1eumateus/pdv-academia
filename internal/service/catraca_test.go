@@ -205,7 +205,8 @@ func TestGateStaffAndReactivate(t *testing.T) {
 		t.Fatal("operador sem permissão não cadastra funcionário")
 	}
 
-	// Reativar: assinatura cancelada de cliente inativo volta, com a mensalidade vencendo hoje.
+	// Reativar: a mesma assinatura volta e o cliente inativo é ativado. Nunca foi paga:
+	// a mensalidade de antes (vence hoje) volta em aberto e ainda se paga antes de entrar.
 	subs := NewSubscriptionService(b)
 	days := int64(30)
 	plan, err := e.products.Create(e.ctx, models.ProductInput{Name: "Mensal", PriceCents: 9000, Active: true, PlanDays: &days})
@@ -227,7 +228,7 @@ func TestGateStaffAndReactivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	re, err := subs.Reactivate(e.ctx, sub.ID)
-	if err != nil || re.Status != "ativa" || re.ID == sub.ID || re.OpenInvoice == nil || re.OpenInvoice.AmountCents != 8500 ||
+	if err != nil || re.Status != "ativa" || re.ID != sub.ID || re.OpenInvoice == nil || re.OpenInvoice.AmountCents != 8500 ||
 		re.OpenInvoice.DueDate != time.Now().Format(dateLayout) {
 		t.Fatalf("reativar: %v %+v", err, re)
 	}
@@ -613,5 +614,67 @@ func TestGateImportFromDevice(t *testing.T) {
 	}
 	if n, err := gate.TestDevice(e.ctx); err != nil || n != 3 {
 		t.Fatalf("teste do aparelho: %v %d", err, n)
+	}
+}
+
+// Cancelou por engano quem já tinha pago: reativar devolve a mesma assinatura com o
+// vencimento de antes, sem cobrar de novo, e a catraca libera. Excluir a cancelada a
+// tira da lista sem apagar as mensalidades pagas.
+func TestReactivatePaidAndDelete(t *testing.T) {
+	e := newEnv(t).withCash()
+	b := NewBase(e.db)
+	subs, gate := NewSubscriptionService(b), NewCatracaService(b)
+	days := int64(30)
+	plan, err := e.products.Create(e.ctx, models.ProductInput{Name: "Mensal", PriceCents: 9000, Active: true, PlanDays: &days})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ana := e.customer("Ana", 0)
+	sub, err := subs.Create(e.ctx, ana.ID, plan.ID, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := subs.Pay(e.ctx, models.PayInvoiceInput{InvoiceID: sub.OpenInvoice.ID, PaymentMethod: "pix"}); err != nil {
+		t.Fatal(err)
+	}
+	paid, _ := subs.get(e.ctx, sub.ID)
+	due := paid.OpenInvoice.DueDate
+	if err := subs.Delete(e.ctx, sub.ID); codeOf(err) != CodeStateConflict {
+		t.Fatalf("só exclui cancelada: %v", err)
+	}
+	if _, err := subs.Cancel(e.ctx, sub.ID); err != nil {
+		t.Fatal(err)
+	}
+	re, err := subs.Reactivate(e.ctx, sub.ID)
+	if err != nil || re.ID != sub.ID || re.OpenInvoice == nil || re.OpenInvoice.ID != paid.OpenInvoice.ID || re.OpenInvoice.DueDate != due {
+		t.Fatalf("reativar deveria voltar a mensalidade de %s: %v %+v", due, err, re.OpenInvoice)
+	}
+	if m, _ := gate.member(e.ctx, ana.ID); !m.Allowed {
+		t.Fatalf("já tinha pago: deveria passar: %+v", m)
+	}
+	if invs, _ := subs.Invoices(e.ctx, sub.ID); len(invs) != 2 {
+		t.Fatalf("a paga e a em aberto: %+v", invs)
+	}
+
+	// Excluir: só cancelada, com a permissão; some da lista e não reativa mais.
+	if _, err := subs.Cancel(e.ctx, sub.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := subs.Delete(e.as(e.user("op", models.RoleOperator)), sub.ID); err == nil {
+		t.Fatal("operador sem a permissão não exclui")
+	}
+	if n, err := subs.DeleteCancelled(e.ctx, ana.ID); err != nil || n != 1 {
+		t.Fatalf("excluir canceladas: %d %v", n, err)
+	}
+	if list, _ := subs.List(e.ctx); len(list) != 0 {
+		t.Fatalf("excluída deveria sumir da lista: %+v", list)
+	}
+	if _, err := subs.Reactivate(e.ctx, sub.ID); codeOf(err) != CodeStateConflict {
+		t.Fatalf("excluída não reativa: %v", err)
+	}
+	var kept int
+	e.db.QueryRow(`SELECT COUNT(*) FROM subscription_invoices WHERE subscription_id = ? AND status = 'paga'`, sub.ID).Scan(&kept)
+	if kept != 1 {
+		t.Fatalf("a mensalidade paga continua guardada: %d", kept)
 	}
 }

@@ -150,12 +150,20 @@ export function DeleteBillFile(arg1) {
   return window['go']['main']['App']['DeleteBillFile'](arg1);
 }
 
+export function DeleteCancelledSubscriptions(arg1) {
+  return window['go']['main']['App']['DeleteCancelledSubscriptions'](arg1);
+}
+
 export function DeleteCustomer(arg1) {
   return window['go']['main']['App']['DeleteCustomer'](arg1);
 }
 
 export function DeleteProduct(arg1) {
   return window['go']['main']['App']['DeleteProduct'](arg1);
+}
+
+export function DeleteSubscription(arg1) {
+  return window['go']['main']['App']['DeleteSubscription'](arg1);
 }
 
 export function DiscardComanda(arg1) {

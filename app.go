@@ -973,9 +973,21 @@ func (a *App) SetPlanRules(productID int64, rules models.AccessRules) (models.Ac
 	})
 }
 
-// ReactivateSubscription volta uma assinatura cancelada (ativa o cliente; mensalidade vence hoje).
+// ReactivateSubscription desfaz o cancelamento: a mesma assinatura volta, com a
+// mensalidade em aberto de antes (quem já pagou continua liberado). Ativa o cliente.
 func (a *App) ReactivateSubscription(subID int64) (models.Subscription, error) {
 	return callW(a, "reativar assinatura", func(ctx context.Context) (models.Subscription, error) { return a.subs.Reactivate(ctx, subID) })
+}
+
+// DeleteSubscription exclui uma assinatura cancelada (o histórico de pagamentos fica guardado).
+func (a *App) DeleteSubscription(subID int64) error {
+	_, err := callW(a, "excluir assinatura", func(ctx context.Context) (struct{}, error) { return struct{}{}, a.subs.Delete(ctx, subID) })
+	return err
+}
+
+// DeleteCancelledSubscriptions exclui todas as assinaturas canceladas do cliente; devolve quantas.
+func (a *App) DeleteCancelledSubscriptions(customerID int64) (int, error) {
+	return callW(a, "excluir assinaturas canceladas", func(ctx context.Context) (int, error) { return a.subs.DeleteCancelled(ctx, customerID) })
 }
 
 func (a *App) CancelSubscription(subID int64) (models.Subscription, error) {

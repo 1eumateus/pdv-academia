@@ -100,7 +100,8 @@ const canOutside = computed(() => can('pagamento_fora_caixa'))
 const canExempt = computed(() => can('isentar_assinatura'))
 const outside = ref(false)
 const paidDate = ref(today())
-// Próximo vencimento: sugere pagamento + duração do plano; pode ser trocado.
+// Próximo vencimento: pagou adiantado, sugere o vencimento + duração do plano (mantém o
+// dia); no dia ou atrasado, pagamento + duração. Pode ser trocado. Mesma regra do servidor (nextDue).
 const nextDue = ref('')
 const nextEdited = ref(false)
 function addDays(date: string, days: number) {
@@ -109,7 +110,11 @@ function addDays(date: string, days: number) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 function suggestNext() {
-  if (!nextEdited.value && paying.value) nextDue.value = addDays(outside.value ? paidDate.value || today() : today(), paying.value.planDays)
+  if (nextEdited.value || !paying.value) return
+  const paid = outside.value ? paidDate.value || today() : today()
+  const days = paying.value.planDays
+  const due = paying.value.openInvoice?.dueDate
+  nextDue.value = addDays(due && due > paid ? due : paid, days)
 }
 watch([outside, paidDate], suggestNext)
 // Isenção e baixa fora do caixa são caminhos diferentes: marcar um desmarca o outro.
@@ -252,13 +257,17 @@ async function resume(s: Sub) {
   }
 }
 
-// Reativar: o cliente volta a ficar ativo e a mensalidade vence hoje (paga antes de entrar).
+// Reativar: desfaz o cancelamento. A mesma assinatura volta com a mensalidade de antes:
+// quem já tinha pago continua liberado até o vencimento.
 const reactivating = ref(0)
 async function reactivate(s: Sub) {
   reactivating.value = s.id
   try {
     const r = await call(ReactivateSubscription(s.id))
-    toast.success(`Assinatura de ${r.customerName} reativada no plano ${r.planName}. A mensalidade vence hoje: receba para liberar a catraca.`)
+    const due = r.openInvoice?.dueDate ?? ''
+    toast.success(due > today()
+      ? `Assinatura de ${r.customerName} reativada no plano ${r.planName}, em dia até ${brDate(due)}. Catraca liberada.`
+      : `Assinatura de ${r.customerName} reativada no plano ${r.planName}. A mensalidade venceu${due ? ` em ${brDate(due)}` : ''}: receba para liberar a catraca.`)
     emit('changed')
   } catch (e) {
     toast.error(errorMessage(e))
@@ -312,7 +321,7 @@ defineExpose({ openCreate, openPay, openChange, openPause, resume, reactivate, r
         </label>
         <label class="field">Valor especial deste aluno (opcional)<input v-model="form.price" inputmode="decimal" placeholder="Vazio = preço do plano" /></label>
         <AccessRulesFields v-model="form.rules" v-model:own="form.own" with-plan :plan="form.productId ? planRules[form.productId] : null" />
-        <p class="small muted" style="margin: 0">A primeira fatura vence hoje. Ao receber, a próxima vence na data do pagamento + a duração do plano.</p>
+        <p class="small muted" style="margin: 0">A primeira fatura vence hoje. Ao receber, a próxima vence na data do pagamento + a duração do plano (se pagar adiantado, mantém o dia do vencimento).</p>
         <div v-if="form.error" class="alert error" role="alert">{{ form.error }}</div>
         <footer class="row end">
           <button type="button" :disabled="form.busy" @click="form.open = false">Cancelar</button>
@@ -367,7 +376,7 @@ defineExpose({ openCreate, openPay, openChange, openPause, resume, reactivate, r
       </form>
     </Modal>
     <ConfirmDialog v-if="cancelAsk" title="Cancelar assinatura" danger :busy="cancelBusy"
-      :message="`Cancelar o plano ${cancelAsk.planName} de ${cancelAsk.customerName}? A fatura em aberto deixa de existir.`"
+      :message="`Cancelar o plano ${cancelAsk.planName} de ${cancelAsk.customerName}? Se foi por engano, dá para reativar na aba Canceladas do perfil, sem cobrar de novo.`"
       confirm-label="Cancelar assinatura" cancel-label="Voltar" @confirm="cancel" @cancel="cancelAsk = null" />
     <ConfirmDialog v-if="endExemptAsk" title="Encerrar isenção" :busy="endExemptBusy"
       :message="`Encerrar a isenção de ${endExemptAsk.customerName}? A mensalidade de ${money(endExemptAsk.openInvoice?.amountCents ?? 0)} passa a vencer hoje.`"
@@ -383,7 +392,7 @@ defineExpose({ openCreate, openPay, openChange, openPause, resume, reactivate, r
         </label>
         <label class="field">Valor especial deste aluno (opcional)<input v-model="change.price" inputmode="decimal" placeholder="Vazio = preço do plano" /></label>
         <AccessRulesFields v-model="change.rules" v-model:own="change.own" with-plan :plan="planRules[change.productId]" />
-        <p v-if="planChanged" class="small muted" style="margin: 0">A mensalidade em aberto passa a ter o valor do novo plano e vence hoje. Quando a pessoa pagar, a próxima vence na data do pagamento + a duração do novo plano.</p>
+        <p v-if="planChanged" class="small muted" style="margin: 0">A mensalidade em aberto passa a ter o valor do novo plano e vence hoje. Quando a pessoa pagar, a próxima vence hoje + a duração do novo plano.</p>
         <div v-if="change.error" class="alert error" role="alert">{{ change.error }}</div>
         <footer class="row end">
           <button type="button" :disabled="change.busy" @click="change.sub = null">Cancelar</button>

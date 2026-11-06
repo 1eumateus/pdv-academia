@@ -63,10 +63,10 @@ func scanSub(s interface{ Scan(...any) error }) (models.Subscription, error) {
 	return v, err
 }
 
-// List: ativas primeiro (fatura que vence antes no topo), depois as canceladas.
+// List: ativas primeiro (fatura que vence antes no topo), depois as canceladas (sem as excluídas).
 func (SubscriptionRepo) List(ctx context.Context, q DBTX) ([]models.Subscription, error) {
 	const op = "listar assinaturas"
-	rows, err := q.QueryContext(ctx, subSelect+` ORDER BY s.status = 'cancelada', i.due_date IS NULL, i.due_date, c.name COLLATE NOCASE`)
+	rows, err := q.QueryContext(ctx, subSelect+` WHERE s.deleted_at IS NULL ORDER BY s.status = 'cancelada', i.due_date IS NULL, i.due_date, c.name COLLATE NOCASE`)
 	if err != nil {
 		return nil, wrap(op, err)
 	}
@@ -194,6 +194,81 @@ func (SubscriptionRepo) InsertImportedInvoice(ctx context.Context, q DBTX, subID
 		`INSERT INTO subscription_invoices (subscription_id, due_date, amount_cents, status, paid_at, created_at, imported) VALUES (?, ?, ?, ?, ?, ?, 1)`,
 		subID, dueDate, amount, status, paid, FormatTime(now))
 	return wrap("importar fatura", err)
+}
+
+// Restore volta a assinatura cancelada (e não excluída) para ativa; false se não estava.
+func (SubscriptionRepo) Restore(ctx context.Context, q DBTX, id int64) (bool, error) {
+	const op = "reativar assinatura"
+	res, err := q.ExecContext(ctx, `UPDATE subscriptions SET status = 'ativa', cancelled_at = NULL
+		WHERE id = ? AND status = 'cancelada' AND deleted_at IS NULL`, id)
+	if err != nil {
+		return false, wrap(op, err)
+	}
+	n, err := affected(op, res)
+	return n > 0, err
+}
+
+// CancelledOpen acha a mensalidade que estava em aberto quando a assinatura foi
+// cancelada (0 se não há): a cancelada mais nova, depois de todas as pagas, que é a
+// primeira da assinatura ou veio logo depois de uma paga (ou de uma "não utilizou"
+// da importação). A cancelada ao desfazer um pagamento vem depois de uma que deixou
+// de ser paga, então não conta.
+func (SubscriptionRepo) CancelledOpen(ctx context.Context, q DBTX, subID int64) (int64, error) {
+	var id int64
+	err := q.QueryRowContext(ctx, `SELECT c.id FROM subscription_invoices c
+		WHERE c.subscription_id = ? AND c.status = 'cancelada'
+		  AND c.id > COALESCE((SELECT MAX(id) FROM subscription_invoices WHERE subscription_id = c.subscription_id AND status = 'paga'), 0)
+		  AND COALESCE((SELECT p.status FROM subscription_invoices p WHERE p.subscription_id = c.subscription_id AND p.id < c.id
+		                ORDER BY p.id DESC LIMIT 1), 'paga') IN ('paga', 'nao_paga')
+		ORDER BY c.id DESC LIMIT 1`, subID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return id, wrap("buscar mensalidade da assinatura cancelada", err)
+}
+
+// ReopenInvoice volta a mensalidade cancelada para em aberto.
+func (SubscriptionRepo) ReopenInvoice(ctx context.Context, q DBTX, invoiceID int64) error {
+	_, err := q.ExecContext(ctx, `UPDATE subscription_invoices SET status = 'aberta' WHERE id = ? AND status = 'cancelada'`, invoiceID)
+	return wrap("reabrir mensalidade", err)
+}
+
+// LastPaidDue: o vencimento mais novo entre as mensalidades pagas ("" se nenhuma).
+func (SubscriptionRepo) LastPaidDue(ctx context.Context, q DBTX, subID int64) (string, error) {
+	var due sql.NullString
+	err := q.QueryRowContext(ctx, `SELECT MAX(due_date) FROM subscription_invoices WHERE subscription_id = ? AND status = 'paga'`, subID).Scan(&due)
+	return due.String, wrap("buscar último vencimento pago", err)
+}
+
+// SoftDelete exclui a assinatura cancelada (some das telas; o histórico fica); false se não estava cancelada.
+func (SubscriptionRepo) SoftDelete(ctx context.Context, q DBTX, id int64, now time.Time) (bool, error) {
+	const op = "excluir assinatura"
+	res, err := q.ExecContext(ctx, `UPDATE subscriptions SET deleted_at = ? WHERE id = ? AND status = 'cancelada' AND deleted_at IS NULL`,
+		FormatTime(now), id)
+	if err != nil {
+		return false, wrap(op, err)
+	}
+	n, err := affected(op, res)
+	return n > 0, err
+}
+
+// CancelledOf: as assinaturas canceladas (e não excluídas) do cliente.
+func (SubscriptionRepo) CancelledOf(ctx context.Context, q DBTX, customerID int64) ([]int64, error) {
+	const op = "listar assinaturas canceladas"
+	rows, err := q.QueryContext(ctx, `SELECT id FROM subscriptions WHERE customer_id = ? AND status = 'cancelada' AND deleted_at IS NULL`, customerID)
+	if err != nil {
+		return nil, wrap(op, err)
+	}
+	defer rows.Close()
+	ids := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, wrap(op, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, wrap(op, rows.Err())
 }
 
 // Cancel encerra a assinatura e cancela a fatura aberta; false se já estava cancelada.

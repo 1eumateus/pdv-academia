@@ -4,17 +4,21 @@
 // alterar, pausar, cancelar, reativar, liberar). Fica na ficha do aluno e no
 // histórico da tela Assinaturas. Todos os botões são type="button": a ficha é um formulário.
 import { computed, onMounted, ref } from 'vue'
-import { ListPlanRules, ListSubscriptionInvoices, ListSubscriptions } from '../../wailsjs/go/main/App'
+import { DeleteCancelledSubscriptions, DeleteSubscription, ListPlanRules, ListSubscriptionInvoices, ListSubscriptions } from '../../wailsjs/go/main/App'
 import { call, errorMessage } from '../api'
+import ConfirmDialog from './ConfirmDialog.vue'
 import Icon from './Icon.vue'
 import SubscriptionActions from './SubscriptionActions.vue'
 import { describeRules } from '../composables/accessRules'
 import { formatDateTime, money } from '../composables/format'
+import { can } from '../composables/session'
 import { brDate, exemptLabel, planLabel } from '../composables/subscriptions'
+import { useToast } from '../composables/toast'
 import { models } from '../types'
 
 type Sub = models.Subscription
 const props = defineProps<{ customerId: number }>()
+const toast = useToast()
 const emit = defineEmits<{ changed: [] }>()
 
 const subs = ref<Sub[]>([])
@@ -47,6 +51,40 @@ function changed() {
   emit('changed')
 }
 
+// Abas: ativas (e pausadas) ou só as canceladas.
+const tab = ref<'ativas' | 'canceladas'>('ativas')
+const active = computed(() => subs.value.filter((s) => s.status !== 'cancelada'))
+const cancelled = computed(() => subs.value.filter((s) => s.status === 'cancelada'))
+const shown = computed(() => (tab.value === 'ativas' ? active.value : cancelled.value))
+
+// Excluir cancelada(s): some do perfil e das listas; as mensalidades pagas e as vendas ficam.
+const canDelete = computed(() => can('catraca_apagar_aluno'))
+const deleteAsk = ref<Sub | 'todas' | null>(null)
+const deleteBusy = ref(false)
+const deleteMessage = computed(() => deleteAsk.value === 'todas'
+  ? `Excluir as ${cancelled.value.length} assinatura(s) cancelada(s)? Elas somem do perfil e não dá mais para reativar. As mensalidades pagas e as vendas continuam guardadas.`
+  : deleteAsk.value ? `Excluir a assinatura cancelada do plano ${deleteAsk.value.planName}? Ela some do perfil e não dá mais para reativar. As mensalidades pagas e as vendas continuam guardadas.` : '')
+async function confirmDelete() {
+  const ask = deleteAsk.value
+  if (!ask) return
+  deleteBusy.value = true
+  try {
+    if (ask === 'todas') {
+      const n = await call(DeleteCancelledSubscriptions(props.customerId))
+      toast.success(`${n} assinatura(s) cancelada(s) excluída(s).`)
+    } else {
+      await call(DeleteSubscription(ask.id))
+      toast.success(`Assinatura cancelada do plano ${ask.planName} excluída.`)
+    }
+    deleteAsk.value = null
+    changed()
+  } catch (e) {
+    toast.error(errorMessage(e))
+  } finally {
+    deleteBusy.value = false
+  }
+}
+
 const paid = computed(() => Object.values(invoices.value).flat().filter((i) => i.status === 'paga'))
 const rulesText = (s: Sub) => {
   const d = describeRules(s.rules ?? planRules.value[s.productId])
@@ -70,10 +108,18 @@ function badge(s: Sub): { label: string; cls: string } {
       </p>
       <button type="button" class="primary" @click="actions?.openCreate(customerId)">+ Nova assinatura</button>
     </div>
+    <div class="row between wrap">
+      <div class="tabs seg" role="tablist" aria-label="Assinaturas do aluno">
+        <button type="button" role="tab" :aria-selected="tab === 'ativas'" @click="tab = 'ativas'">Ativas <span class="chip-count">{{ active.length }}</span></button>
+        <button type="button" role="tab" :aria-selected="tab === 'canceladas'" @click="tab = 'canceladas'">Canceladas <span class="chip-count">{{ cancelled.length }}</span></button>
+      </div>
+      <button v-if="tab === 'canceladas' && cancelled.length" type="button" class="link icon-btn" style="color: var(--danger)" :disabled="!canDelete"
+        :title="canDelete ? 'Excluir todas as canceladas deste aluno (o histórico de pagamentos fica)' : 'Sem permissão (apagar aluno)'" @click="deleteAsk = 'todas'"><Icon name="remover" /><span>Excluir canceladas</span></button>
+    </div>
     <div v-if="loading" class="state">Carregando assinaturas…</div>
     <div v-else-if="error" class="alert error">{{ error }} <button type="button" class="link" @click="load">Tentar novamente</button></div>
-    <div v-else-if="!subs.length" class="state">Nenhuma assinatura. Use "+ Nova assinatura".</div>
-    <div v-for="x in subs" :key="x.id" class="hist-card">
+    <div v-else-if="!shown.length" class="state">{{ tab === 'ativas' ? 'Nenhuma assinatura ativa. Use "+ Nova assinatura".' : 'Nenhuma assinatura cancelada.' }}</div>
+    <div v-for="x in shown" :key="x.id" class="hist-card">
       <div class="row between">
         <strong>{{ x.planName }} <span class="small muted">· {{ planLabel(x.planDays) }}</span></strong>
         <span class="badge" :class="badge(x).cls">{{ badge(x).label }}</span>
@@ -93,8 +139,9 @@ function badge(s: Sub): { label: string; cls: string } {
         <button v-if="x.status === 'ativa' && !x.pausedAt" type="button" class="link icon-btn" title="Trocar o plano, o valor ou as regras de acesso" @click="actions?.openChange(x)"><Icon name="edit" /><span>Alterar</span></button>
         <button v-if="x.status === 'ativa' && !x.pausedAt && !x.exempt" type="button" class="link icon-btn" :disabled="!actions?.canPause" :title="actions?.canPause ? 'Pausar: os dias pausados não contam' : actions?.noPauseTip" @click="actions?.openPause(x)"><Icon name="t-historico" /><span>Pausar</span></button>
         <button v-if="x.pausedAt" type="button" class="link icon-btn" style="color: var(--success)" :disabled="!actions?.canPause" :title="actions?.canPause ? 'Retomar: o vencimento anda os dias pausados' : actions?.noPauseTip" @click="actions?.resume(x)"><Icon name="ativar" /><span>Retomar</span></button>
-        <button v-if="x.status === 'cancelada'" type="button" class="link icon-btn" style="color: var(--success)" :disabled="actions?.reactivating !== 0" title="Volta a assinatura no mesmo plano e valor; a mensalidade vence hoje" @click="actions?.reactivate(x)"><Icon name="ativar" /><span>{{ actions?.reactivating === x.id ? 'Reativando…' : 'Reativar' }}</span></button>
+        <button v-if="x.status === 'cancelada'" type="button" class="link icon-btn" style="color: var(--success)" :disabled="actions?.reactivating !== 0" title="Desfaz o cancelamento: volta no mesmo plano e valor, com a mensalidade de antes (quem já pagou continua liberado)" @click="actions?.reactivate(x)"><Icon name="ativar" /><span>{{ actions?.reactivating === x.id ? 'Reativando…' : 'Reativar' }}</span></button>
         <button v-if="x.status === 'ativa'" type="button" class="link icon-btn" title="Cancelar a assinatura" @click="actions?.askCancel(x)"><Icon name="cancelar" /><span>Cancelar</span></button>
+        <button v-if="x.status === 'cancelada'" type="button" class="link icon-btn" style="color: var(--danger)" :disabled="!canDelete" :title="canDelete ? 'Excluir: some do perfil; o histórico de pagamentos fica' : 'Sem permissão (apagar aluno)'" @click="deleteAsk = x"><Icon name="remover" /><span>Excluir</span></button>
       </div>
       <table>
         <thead><tr><th>Vencimento</th><th class="right">Valor</th><th>Situação</th><th>Pago em</th><th></th></tr></thead>
@@ -115,6 +162,8 @@ function badge(s: Sub): { label: string; cls: string } {
       </table>
     </div>
     <SubscriptionActions ref="actions" @changed="changed" />
+    <ConfirmDialog v-if="deleteAsk" :title="deleteAsk === 'todas' ? 'Excluir canceladas' : 'Excluir assinatura'" danger :busy="deleteBusy"
+      :message="deleteMessage" confirm-label="Excluir" cancel-label="Voltar" @confirm="confirmDelete" @cancel="deleteAsk = null" />
   </div>
 </template>
 

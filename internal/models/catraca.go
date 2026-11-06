@@ -57,7 +57,7 @@ type GatePlan struct {
 	// DueDate: vencimento da mensalidade em aberto (AAAA-MM-DD; "" = nenhuma).
 	DueDate string `json:"dueDate"`
 	Paused  bool   `json:"paused"`
-	// EverPaid: já teve alguma mensalidade paga (a primeira em aberto não libera).
+	// EverPaid: já teve alguma mensalidade paga ou veio do sistema antigo (a primeira em aberto não libera).
 	EverPaid bool `json:"everPaid"`
 }
 

@@ -466,7 +466,7 @@ type PayInvoiceInput struct {
 	PaymentMethod string         `json:"paymentMethod"`
 	Payments      []PaymentInput `json:"payments"`
 	RequestID     string         `json:"requestId"`
-	// NextDue: próximo vencimento escolhido (AAAA-MM-DD; vazio = pagamento + duração do plano).
+	// NextDue: próximo vencimento escolhido (AAAA-MM-DD; vazio = vencimento ou, se pagou atrasado, pagamento + duração do plano).
 	NextDue string `json:"nextDue"`
 	// DiscountCents: desconto nesta mensalidade (menor que o valor; para zerar, use Exempt).
 	DiscountCents int64 `json:"discountCents"`

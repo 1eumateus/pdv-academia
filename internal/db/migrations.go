@@ -63,6 +63,7 @@ func Migrations() []Migration {
 		// Versão só marcada: um número 38 antigo já circulou sem esta tabela. O esquema
 		// da troca vem de ensurePaymentChanges, que olha a tabela e não o número.
 		{Name: "troca única da forma de pagamento da venda"},
+		{Name: "excluir assinatura cancelada", Statements: migration39},
 	}
 }
 
@@ -1071,6 +1072,12 @@ var migration36 = []string{
 		created_at TEXT    NOT NULL
 	)`,
 	`CREATE INDEX ix_bill_files_bill ON bill_files (bill_id)`,
+}
+
+// Assinatura cancelada excluída: some das telas (deleted_at), mas as mensalidades
+// pagas e as vendas continuam guardadas.
+var migration39 = []string{
+	`ALTER TABLE subscriptions ADD COLUMN deleted_at TEXT`,
 }
 
 // Valor especial por aluno (price_cents: nulo = preço do plano) e faturas que

@@ -352,7 +352,7 @@ func TestPaymentChangesCreatedOnOldVersion38(t *testing.T) {
 			t.Fatalf("tabelas %d, travas %d", tables, guarded)
 		}
 	}
-	if v, _ := UserVersion(ctx, conn); v != 38 {
+	if v, _ := UserVersion(ctx, conn); v != LatestVersion() {
 		t.Fatalf("versão %d", v)
 	}
 }

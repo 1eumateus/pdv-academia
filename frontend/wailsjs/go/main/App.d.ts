@@ -76,9 +76,13 @@ export function DeleteBill(arg1:number):Promise<void>;
 
 export function DeleteBillFile(arg1:number):Promise<void>;
 
+export function DeleteCancelledSubscriptions(arg1:number):Promise<number>;
+
 export function DeleteCustomer(arg1:number):Promise<boolean>;
 
 export function DeleteProduct(arg1:number):Promise<boolean>;
+
+export function DeleteSubscription(arg1:number):Promise<void>;
 
 export function DiscardComanda(arg1:number):Promise<models.ComandaDetails>;
 

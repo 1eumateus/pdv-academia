@@ -39,10 +39,12 @@ func scanGateMember(s interface{ Scan(...any) error }) (models.GateMember, error
 
 // gatePlans traz as assinaturas ativas, agrupadas por cliente (customerID 0 = todos),
 // com as regras de acesso que valem: a exceção da assinatura ou, sem ela, as do plano.
+// EverPaid: tem mensalidade paga ou veio do sistema antigo (importada): quem já era
+// aluno lá não é tratado como assinatura nova que paga a primeira antes de entrar.
 func gatePlans(ctx context.Context, q DBTX, customerID int64) (map[int64][]models.GatePlan, error) {
 	const op = "ler planos do aluno"
 	rows, err := q.QueryContext(ctx, `SELECT s.customer_id, p.name, COALESCE(i.due_date, ''), s.paused_at IS NOT NULL,
-		EXISTS (SELECT 1 FROM subscription_invoices x WHERE x.subscription_id = s.id AND x.status = 'paga'),
+		EXISTS (SELECT 1 FROM subscription_invoices x WHERE x.subscription_id = s.id AND (x.status = 'paga' OR x.imported = 1)),
 		COALESCE(r.dias, pr.dias), COALESCE(r.vezes_semana, pr.vezes_semana), COALESCE(r.entradas_dia, pr.entradas_dia)
 		FROM subscriptions s JOIN products p ON p.id = s.product_id
 		LEFT JOIN subscription_invoices i ON i.subscription_id = s.id AND i.status = 'aberta'

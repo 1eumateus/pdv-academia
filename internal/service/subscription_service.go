@@ -17,7 +17,7 @@ import (
 
 // SubscriptionService: assinaturas de planos (academia). O plano é um produto
 // com duração (plan_days). Pagar a fatura registra uma venda do plano no caixa
-// de quem recebe e gera a próxima fatura para a data do pagamento + duração.
+// de quem recebe e gera a próxima fatura (vencimento + duração se pagou adiantado; senão, pagamento + duração).
 // Sem pagamento não há fatura nova: só uma aberta por assinatura.
 type SubscriptionService struct {
 	Base
@@ -147,12 +147,15 @@ func (s *SubscriptionService) Create(ctx context.Context, customerID, productID,
 	return s.get(ctx, id)
 }
 
-// Reactivate volta uma assinatura cancelada: ativa o cliente, se inativo, e
-// cria uma assinatura nova no mesmo plano e valor, com a mensalidade vencendo
-// hoje (paga antes de entrar, como uma assinatura nova).
+// Reactivate desfaz o cancelamento: a mesma assinatura volta a ficar ativa, com o
+// mesmo plano, valor, regras e histórico, e a mensalidade que estava em aberto
+// quando foi cancelada volta com o vencimento de antes. Quem já tinha pago continua
+// liberado até esse vencimento; não cobra de novo. Sem essa mensalidade (assinatura
+// importada já cancelada), gera uma vencendo no último vencimento pago + a duração
+// do plano, ou hoje se isso já passou. Cliente inativo é ativado.
 func (s *SubscriptionService) Reactivate(ctx context.Context, subID int64) (models.Subscription, error) {
-	var id int64
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		now := s.Now()
 		old, err := s.subs.GetByID(ctx, tx, subID)
 		if err != nil {
 			return fromRepo(err, newErr(CodeNotFound, "Assinatura %d não encontrada.", subID), "")
@@ -160,13 +163,116 @@ func (s *SubscriptionService) Reactivate(ctx context.Context, subID int64) (mode
 		if old.Status != "cancelada" {
 			return newErr(CodeStateConflict, "A assinatura de %s não está cancelada.", old.CustomerName)
 		}
-		id, err = s.create(ctx, tx, old.CustomerID, old.ProductID, old.PriceCents, old.Rules, true)
-		return err
+		p, err := s.products.GetByID(ctx, tx, old.ProductID)
+		if err != nil {
+			return fromRepo(err, notFoundErr(CodeProductNotFound, "Produto", old.ProductID), "")
+		}
+		if p.PlanDays == nil || !p.Active || p.PricePending {
+			return newErr(CodeProductInactive, "O plano %q está inativo ou sem preço.", p.Name)
+		}
+		if dup, err := s.subs.ActiveExists(ctx, tx, old.CustomerID, old.ProductID); err != nil {
+			return err
+		} else if dup {
+			return newErr(CodeDuplicate, "%s já tem o plano %q ativo.", old.CustomerName, p.Name)
+		}
+		c, err := s.customers.GetByID(ctx, tx, old.CustomerID)
+		if err != nil {
+			return fromRepo(err, notFoundErr(CodeCustomerNotFound, "Cliente", old.CustomerID), "")
+		}
+		if !c.Active {
+			if err := s.customers.SetActive(ctx, tx, c.ID, true, now); err != nil {
+				return err
+			}
+		}
+		if ok, err := s.subs.Restore(ctx, tx, subID); err != nil {
+			return err
+		} else if !ok {
+			return newErr(CodeStateConflict, "A assinatura de %s foi excluída ou já não está cancelada.", old.CustomerName)
+		}
+		invID, err := s.subs.CancelledOpen(ctx, tx, subID)
+		if err != nil {
+			return err
+		}
+		var due string
+		if invID > 0 {
+			if err := s.subs.ReopenInvoice(ctx, tx, invID); err != nil {
+				return err
+			}
+		} else {
+			today := now.In(Location()).Format(dateLayout)
+			due = today
+			last, err := s.subs.LastPaidDue(ctx, tx, subID)
+			if err != nil {
+				return err
+			}
+			if d, err := time.ParseInLocation(dateLayout, last, Location()); err == nil {
+				if next := d.AddDate(0, 0, int(*p.PlanDays)).Format(dateLayout); next > today {
+					due = next
+				}
+			}
+			if err := s.subs.InsertInvoice(ctx, tx, subID, due, cmpOr(old.PriceCents, p.PriceCents), now); err != nil {
+				return err
+			}
+		}
+		return audit(ctx, tx, now, nil, "assinatura_reativada", "assinatura", &subID, nil,
+			map[string]any{"cliente": old.CustomerName, "plano": p.Name, "fatura_reaberta": invID, "vencimento_novo": due})
 	})
 	if err != nil {
 		return models.Subscription{}, err
 	}
-	return s.get(ctx, id)
+	return s.get(ctx, subID)
+}
+
+// Delete exclui uma assinatura cancelada: some do perfil e das listas e não dá
+// mais para reativar. As mensalidades pagas e as vendas continuam guardadas.
+// Exige a permissão de apagar aluno.
+func (s *SubscriptionService) Delete(ctx context.Context, subID int64) error {
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		now := s.Now()
+		authBy, err := requirePerm(ctx, now, PermGateRemove)
+		if err != nil {
+			return err
+		}
+		return s.delete(ctx, tx, now, authBy, subID)
+	})
+}
+
+// DeleteCancelled exclui todas as assinaturas canceladas do cliente; devolve quantas.
+func (s *SubscriptionService) DeleteCancelled(ctx context.Context, customerID int64) (int, error) {
+	n := 0
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		now := s.Now()
+		authBy, err := requirePerm(ctx, now, PermGateRemove)
+		if err != nil {
+			return err
+		}
+		ids, err := s.subs.CancelledOf(ctx, tx, customerID)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if err := s.delete(ctx, tx, now, authBy, id); err != nil {
+				return err
+			}
+		}
+		n = len(ids)
+		return nil
+	})
+	return n, err
+}
+
+func (s *SubscriptionService) delete(ctx context.Context, tx *sql.Tx, now time.Time, authBy *int64, subID int64) error {
+	sub, err := s.subs.GetByID(ctx, tx, subID)
+	if err != nil {
+		return fromRepo(err, newErr(CodeNotFound, "Assinatura %d não encontrada.", subID), "")
+	}
+	if ok, err := s.subs.SoftDelete(ctx, tx, subID, now); err != nil {
+		return err
+	} else if !ok {
+		return newErr(CodeStateConflict, "Só dá para excluir assinatura cancelada (cancele antes).")
+	}
+	return audit(ctx, tx, now, authBy, "assinatura_excluida", "assinatura", &subID,
+		map[string]any{"cliente": sub.CustomerName, "plano": sub.PlanName}, nil)
 }
 
 // SetRules troca a exceção de regras da assinatura (nil = segue o plano); a mensalidade não muda.
@@ -393,7 +499,7 @@ func (s *SubscriptionService) Pay(ctx context.Context, in models.PayInvoiceInput
 		if in.Exempt {
 			next, err = exemptNextDue(in.ExemptUntil, now)
 		} else {
-			next, err = nextDue(in.NextDue, now.In(Location()), days)
+			next, err = nextDue(in.NextDue, now.In(Location()), inv.DueDate, days)
 		}
 		if err != nil {
 			return err
@@ -432,7 +538,7 @@ func (s *SubscriptionService) Pay(ctx context.Context, in models.PayInvoiceInput
 
 // PayOutside dá baixa na mensalidade em aberto sem lançar no caixa (pagamento
 // retroativo de um caixa já fechado à mão). paidDate (AAAA-MM-DD, até hoje) é
-// quando foi pago: a próxima vence nessa data + a duração do plano, como em Pay.
+// quando foi pago: a próxima vence como em Pay (regra de nextDue, a partir dessa data).
 // nextDate: próximo vencimento escolhido (vazio = a conta acima).
 func (s *SubscriptionService) PayOutside(ctx context.Context, invoiceID int64, paidDate, nextDate string) (models.Subscription, error) {
 	var subID int64
@@ -478,7 +584,7 @@ func (s *SubscriptionService) PayOutside(ctx context.Context, invoiceID int64, p
 		if p.PlanDays != nil {
 			days = *p.PlanDays
 		}
-		next, err := nextDue(nextDate, paid, days)
+		next, err := nextDue(nextDate, paid, inv.DueDate, days)
 		if err != nil {
 			return err
 		}
@@ -494,10 +600,16 @@ func (s *SubscriptionService) PayOutside(ctx context.Context, invoiceID int64, p
 	return s.get(ctx, subID)
 }
 
-// nextDue: o próximo vencimento escolhido (AAAA-MM-DD) ou, vazio, from + a
-// duração do plano. O escolhido precisa ser depois do pagamento.
-func nextDue(chosen string, from time.Time, days int64) (string, error) {
+// nextDue: o próximo vencimento escolhido (AAAA-MM-DD) ou, vazio, conta a partir
+// do mais tarde entre o vencimento pago (due) e a data do pagamento (from): pagou
+// adiantado ou no dia, mantém o dia de vencimento (due + duração); pagou atrasado,
+// recomeça da data do pagamento (from + duração).
+// O escolhido precisa ser depois do pagamento.
+func nextDue(chosen string, from time.Time, due string, days int64) (string, error) {
 	if chosen == "" {
+		if d, err := time.ParseInLocation(dateLayout, due, Location()); err == nil && due > from.Format(dateLayout) {
+			return d.AddDate(0, 0, int(days)).Format(dateLayout), nil
+		}
 		return from.AddDate(0, 0, int(days)).Format(dateLayout), nil
 	}
 	if _, err := time.Parse(dateLayout, chosen); err != nil {
@@ -545,8 +657,8 @@ func (s *SubscriptionService) UndoOutside(ctx context.Context, invoiceID int64) 
 }
 
 // ChangePlan troca o plano de uma assinatura ativa. A mensalidade em aberto
-// passa a ter o valor do plano novo e vence hoje; ao pagar, a próxima vence na
-// data do pagamento + a duração do plano novo (regra de Pay).
+// passa a ter o valor do plano novo e vence hoje; ao pagar, a próxima vence
+// hoje + a duração do plano novo (regra de Pay).
 // priceCents > 0 = valor especial no plano novo (0 = preço do plano).
 func (s *SubscriptionService) ChangePlan(ctx context.Context, subID, productID, priceCents int64) (models.Subscription, error) {
 	price, err := subPrice(priceCents)

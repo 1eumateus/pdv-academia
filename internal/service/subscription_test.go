@@ -201,10 +201,10 @@ func TestSubscriptionPayOutsideAndNextDue(t *testing.T) {
 	if _, err := subs.PayOutside(e.ctx, sub.OpenInvoice.ID, today.AddDate(0, 0, 1).Format(dateLayout), ""); codeOf(err) != CodeInvalid {
 		t.Fatalf("data futura deveria ser recusada: %v", err)
 	}
-	// Retroativo: sem venda; a próxima vence na data do pagamento + 30 dias.
+	// Retroativo: sem venda; a próxima vence no vencimento pago (hoje) + 30 dias.
 	first := sub.OpenInvoice.ID
 	got, err := subs.PayOutside(e.ctx, first, paid, "")
-	want := today.AddDate(0, 0, -18+30).Format(dateLayout)
+	want := today.AddDate(0, 0, 30).Format(dateLayout)
 	if err != nil || got.OpenInvoice == nil || got.OpenInvoice.DueDate != want {
 		t.Fatalf("próxima deveria vencer em %s: %v %+v", want, err, got.OpenInvoice)
 	}
@@ -241,5 +241,25 @@ func TestSubscriptionPayOutsideAndNextDue(t *testing.T) {
 	}
 	if _, err := subs.UndoOutside(e.ctx, first); codeOf(err) != CodeStateConflict {
 		t.Fatalf("com a seguinte paga, não desfaz: %v", err)
+	}
+}
+
+// Pagou adiantado: mantém o dia de vencimento. No dia ou atrasado: conta da data do pagamento.
+func TestNextDueKeepsDueDay(t *testing.T) {
+	paid := func(d string) time.Time {
+		v, _ := time.ParseInLocation(dateLayout, d, Location())
+		return v.Add(15 * time.Hour)
+	}
+	cases := []struct{ name, due, paidOn, want string }{
+		{"adiantado", "2026-11-10", "2026-11-06", "2026-12-10"},
+		{"no dia", "2026-11-10", "2026-11-10", "2026-12-10"},
+		{"atrasado", "2026-11-10", "2026-11-15", "2026-12-15"},
+		{"muito atrasado", "2026-09-10", "2026-11-06", "2026-12-06"},
+	}
+	for _, c := range cases {
+		got, err := nextDue("", paid(c.paidOn), c.due, 30)
+		if err != nil || got != c.want {
+			t.Errorf("%s: vence %s, pago %s: %s (%v), esperava %s", c.name, c.due, c.paidOn, got, err, c.want)
+		}
 	}
 }

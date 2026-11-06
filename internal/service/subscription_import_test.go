@@ -57,6 +57,19 @@ func TestSubscriptionImport(t *testing.T) {
 			t.Errorf("%s: mensalidade em aberto %+v, esperava vencer em %s", sub.CustomerName, sub.OpenInvoice, want[sub.CustomerName])
 		}
 	}
+	// Veio do sistema antigo: a catraca não trata como assinatura nova (que paga a
+	// primeira antes de entrar), mesmo sem histórico (Carla, modo simples).
+	members, err := NewCatracaService(NewBase(e.db)).Members(e.ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range members {
+		for _, p := range m.Plans {
+			if !p.EverPaid {
+				t.Errorf("%s (%s): importada deveria contar como já paga na catraca", m.Name, p.Name)
+			}
+		}
+	}
 	var old int
 	e.db.QueryRow(`SELECT COUNT(*) FROM subscription_invoices WHERE status = 'nao_paga'`).Scan(&old)
 	if old != 1 {
