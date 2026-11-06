@@ -10,7 +10,7 @@ import Icon from './Icon.vue'
 import SubscriptionActions from './SubscriptionActions.vue'
 import { describeRules } from '../composables/accessRules'
 import { formatDateTime, money } from '../composables/format'
-import { brDate, planLabel } from '../composables/subscriptions'
+import { brDate, exemptLabel, planLabel } from '../composables/subscriptions'
 import { models } from '../types'
 
 type Sub = models.Subscription
@@ -54,6 +54,7 @@ const rulesText = (s: Sub) => {
 }
 function badge(s: Sub): { label: string; cls: string } {
   if (s.status === 'cancelada') return { label: 'Cancelada', cls: '' }
+  if (s.exempt) return { label: exemptLabel(s), cls: 'ok' }
   if (s.pausedAt) return { label: 'Pausada', cls: 'paused' }
   if (s.overdue) return { label: 'Vencida', cls: 'bad' }
   return { label: 'Ativa', cls: 'ok' }
@@ -79,16 +80,18 @@ function badge(s: Sub): { label: string; cls: string } {
       </div>
       <div class="small muted">
         Desde {{ formatDateTime(x.createdAt) }}
-        <template v-if="x.openInvoice"> · mensalidade {{ money(x.openInvoice.amountCents) }}, vence {{ brDate(x.openInvoice.dueDate) }}</template>
+        <template v-if="x.exempt"> · isenção: {{ x.exemptReason }}</template>
+        <template v-else-if="x.openInvoice"> · mensalidade {{ money(x.openInvoice.amountCents) }}, vence {{ brDate(x.openInvoice.dueDate) }}</template>
         <template v-if="x.cancelledAt"> · cancelada em {{ formatDateTime(x.cancelledAt) }}</template>
         <template v-if="x.pausedAt"> · pausada desde {{ formatDateTime(x.pausedAt) }}<template v-if="x.pauseReason"> ({{ x.pauseReason }})</template></template>
       </div>
       <div v-if="rulesText(x)" class="small muted">Acesso: {{ rulesText(x) }}</div>
       <div class="row actions-cell wrap" style="justify-content: flex-start">
-        <button v-if="x.openInvoice && !x.pausedAt" type="button" class="link icon-btn" title="Receber no caixa a mensalidade em aberto" @click="actions?.openPay(x)"><Icon name="receber" /><span>Receber</span></button>
+        <button v-if="x.openInvoice && !x.pausedAt && !x.exempt" type="button" class="link icon-btn" title="Receber no caixa a mensalidade em aberto" @click="actions?.openPay(x)"><Icon name="receber" /><span>Receber</span></button>
+        <button v-if="x.exempt && actions?.canExempt" type="button" class="link icon-btn" title="Encerrar a isenção: a mensalidade passa a vencer hoje" @click="actions?.askEndExempt(x)"><Icon name="cancelar" /><span>Encerrar isenção</span></button>
         <button v-if="x.status === 'ativa'" type="button" class="link icon-btn" style="color: var(--success)" title="Confere a assinatura e abre a catraca se estiver em dia" @click="actions?.release(x)"><Icon name="liberar" /><span>Liberar</span></button>
         <button v-if="x.status === 'ativa' && !x.pausedAt" type="button" class="link icon-btn" title="Trocar o plano, o valor ou as regras de acesso" @click="actions?.openChange(x)"><Icon name="edit" /><span>Alterar</span></button>
-        <button v-if="x.status === 'ativa' && !x.pausedAt" type="button" class="link icon-btn" :disabled="!actions?.canPause" :title="actions?.canPause ? 'Pausar: os dias pausados não contam' : actions?.noPauseTip" @click="actions?.openPause(x)"><Icon name="t-historico" /><span>Pausar</span></button>
+        <button v-if="x.status === 'ativa' && !x.pausedAt && !x.exempt" type="button" class="link icon-btn" :disabled="!actions?.canPause" :title="actions?.canPause ? 'Pausar: os dias pausados não contam' : actions?.noPauseTip" @click="actions?.openPause(x)"><Icon name="t-historico" /><span>Pausar</span></button>
         <button v-if="x.pausedAt" type="button" class="link icon-btn" style="color: var(--success)" :disabled="!actions?.canPause" :title="actions?.canPause ? 'Retomar: o vencimento anda os dias pausados' : actions?.noPauseTip" @click="actions?.resume(x)"><Icon name="ativar" /><span>Retomar</span></button>
         <button v-if="x.status === 'cancelada'" type="button" class="link icon-btn" style="color: var(--success)" :disabled="actions?.reactivating !== 0" title="Volta a assinatura no mesmo plano e valor; a mensalidade vence hoje" @click="actions?.reactivate(x)"><Icon name="ativar" /><span>{{ actions?.reactivating === x.id ? 'Reativando…' : 'Reativar' }}</span></button>
         <button v-if="x.status === 'ativa'" type="button" class="link icon-btn" title="Cancelar a assinatura" @click="actions?.askCancel(x)"><Icon name="cancelar" /><span>Cancelar</span></button>

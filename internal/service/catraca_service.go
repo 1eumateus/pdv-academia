@@ -21,9 +21,17 @@ import (
 	"pdv/internal/repository"
 )
 
-// PermGate: bloquear aluno, dar cortesia, configurar a catraca e mexer no
-// cadastro do leitor (apagar rosto, importar).
-const PermGate = "catraca"
+// Permissões da catraca. PermGate é a antiga, que cobria tudo: só aparece em
+// cadastros gravados antes da divisão (ver legacyPerms).
+const (
+	PermGate       = "catraca"
+	PermGateMember = "catraca_aluno"          // bloquear, cortesia, observação
+	PermGateManual = "catraca_liberar_manual" // abrir sem aluno, com motivo
+	PermGateFace   = "catraca_remover_rosto"
+	PermGateRemove = "catraca_apagar_aluno"
+	PermGateStaff  = "catraca_funcionarios"
+	PermGateConfig = "catraca_configurar" // configurar e importar do leitor
+)
 
 // CatracaService liga o leitor facial e a catraca às assinaturas: o aluno é o
 // cliente do PDV e passa enquanto a mensalidade estiver em dia. Atende o modo
@@ -167,7 +175,7 @@ func (s *CatracaService) SaveConfig(ctx context.Context, in models.GateConfig) (
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		now := s.Now()
-		authBy, err := requirePerm(ctx, now, PermGate)
+		authBy, err := requirePerm(ctx, now, PermGateConfig)
 		if err != nil {
 			return err
 		}
@@ -211,7 +219,7 @@ func (s *CatracaService) Status(ctx context.Context) (models.GateStatus, error) 
 
 // Config devolve a configuração para editar (com a senha, só para quem pode configurar).
 func (s *CatracaService) Config(ctx context.Context) (models.GateConfig, error) {
-	if _, err := requirePerm(ctx, s.Now(), PermGate); err != nil {
+	if _, err := requirePerm(ctx, s.Now(), PermGateConfig); err != nil {
 		return models.GateConfig{}, err
 	}
 	c, _ := s.current()
@@ -295,6 +303,8 @@ func GateDecide(m models.GateMember, now time.Time, toleranceDays int64) (bool, 
 	switch {
 	case best != nil && best.DueDate < today:
 		return true, fmt.Sprintf("%s: mensalidade vencida em %s (dentro da tolerância)", best.Name, brDate(best.DueDate))
+	case best != nil && best.DueDate == models.PermanentExemptDue:
+		return true, best.Name + ": isento"
 	case best != nil:
 		return true, fmt.Sprintf("%s em dia: próxima mensalidade em %s", best.Name, brDate(best.DueDate))
 	case ruleWhy != "":
@@ -472,14 +482,21 @@ func (s *CatracaService) CheckAndRelease(ctx context.Context, customerID int64) 
 	return res, nil
 }
 
-// ManualRelease abre a catraca sem aluno (visitante, aula experimental, teste), com motivo.
+// manualNoReason: o que fica registrado quando a liberação manual vem sem motivo.
+const manualNoReason = "Liberação manual"
+
+// ManualRelease abre a catraca sem aluno (visitante, aula experimental, teste).
+// O motivo é opcional.
 func (s *CatracaService) ManualRelease(ctx context.Context, reason string) error {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
-		return invalid("Informe o motivo da liberação.")
+		reason = manualNoReason
 	}
 	if len([]rune(reason)) > 200 {
 		return invalid("O motivo deve ter no máximo 200 caracteres.")
+	}
+	if _, err := requirePerm(ctx, s.Now(), PermGateManual); err != nil {
+		return err
 	}
 	if err := s.release(ctx); err != nil {
 		return err
@@ -566,7 +583,7 @@ func (s *CatracaService) SaveMember(ctx context.Context, in models.GateMemberInp
 	}
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		now := s.Now()
-		authBy, err := requirePerm(ctx, now, PermGate)
+		authBy, err := requirePerm(ctx, now, PermGateMember)
 		if err != nil {
 			return err
 		}
@@ -612,7 +629,7 @@ func (s *CatracaService) SaveStaff(ctx context.Context, in models.GateStaffInput
 	id := in.CustomerID
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		now := s.Now()
-		authBy, err := requirePerm(ctx, now, PermGate)
+		authBy, err := requirePerm(ctx, now, PermGateStaff)
 		if err != nil {
 			return err
 		}
@@ -656,7 +673,7 @@ func (s *CatracaService) SaveStaff(ctx context.Context, in models.GateStaffInput
 func (s *CatracaService) RemoveStaff(ctx context.Context, customerID int64) (models.GateMember, error) {
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		now := s.Now()
-		authBy, err := requirePerm(ctx, now, PermGate)
+		authBy, err := requirePerm(ctx, now, PermGateStaff)
 		if err != nil {
 			return err
 		}
@@ -671,6 +688,64 @@ func (s *CatracaService) RemoveStaff(ctx context.Context, customerID int64) (mod
 	return s.member(ctx, customerID)
 }
 
+// enrollTarget prepara o cadastro do rosto: confere o aparelho e o aluno e
+// cria a pessoa no iDFace se ela ainda não existe lá.
+func (s *CatracaService) enrollTarget(ctx context.Context, customerID int64) (models.GateMember, *device.ControlID, error) {
+	c, dev := s.current()
+	if c.DeviceHost == "" {
+		return models.GateMember{}, nil, invalid("Configure o IP do iDFace antes de cadastrar rostos.")
+	}
+	m, err := s.member(ctx, customerID)
+	if err != nil {
+		return m, nil, err
+	}
+	if !m.Active {
+		return m, nil, newErr(CodeCustomerInactive, "O cliente %s está inativo.", m.Name)
+	}
+	if m.DeviceUserID == nil {
+		// A matrícula no aparelho é C + código do cliente: a importação liga por ela.
+		id, err := dev.CreateUser(ctx, m.Name, "C"+strconv.FormatInt(m.CustomerID, 10))
+		if err != nil {
+			return m, nil, deviceErr(err)
+		}
+		if err := s.repo.SetDevice(ctx, s.DB, m.CustomerID, &id, s.Now()); err != nil {
+			return m, nil, fromRepo(err, nil, "Este usuário do leitor já está ligado a outro cliente.")
+		}
+		m.DeviceUserID = &id
+	}
+	return m, dev, nil
+}
+
+// maxFacePhoto: tamanho máximo da foto enviada para cadastrar o rosto.
+const maxFacePhoto = 4 << 20
+
+// EnrollFacePhoto cadastra o rosto do aluno a partir de uma foto (JPEG ou PNG),
+// sem precisar ficar na frente do leitor.
+func (s *CatracaService) EnrollFacePhoto(ctx context.Context, customerID int64, img []byte) (models.GateMember, error) {
+	if len(img) == 0 {
+		return models.GateMember{}, invalid("Escolha uma foto.")
+	}
+	if len(img) > maxFacePhoto {
+		return models.GateMember{}, invalid("A foto é grande demais (máximo %d MB).", maxFacePhoto>>20)
+	}
+	if ct := http.DetectContentType(img); ct != "image/jpeg" && ct != "image/png" {
+		return models.GateMember{}, invalid("Use uma foto JPG ou PNG.")
+	}
+	if !s.enrollMu.TryLock() {
+		return models.GateMember{}, newErr(CodeStateConflict, "Já há um cadastro de rosto em andamento no leitor.")
+	}
+	defer s.enrollMu.Unlock()
+	m, dev, err := s.enrollTarget(ctx, customerID)
+	if err != nil {
+		return m, err
+	}
+	if err := dev.SetUserImage(ctx, *m.DeviceUserID, img); err != nil {
+		return m, deviceErr(err)
+	}
+	s.forgetPhoto(*m.DeviceUserID)
+	return s.member(ctx, m.CustomerID)
+}
+
 // EnrollFace cria o aluno no iDFace (se ainda não existe lá) e abre a câmera
 // do aparelho para cadastrar o rosto. Só um cadastro por vez.
 func (s *CatracaService) EnrollFace(ctx context.Context, customerID int64) (models.GateMember, error) {
@@ -678,27 +753,9 @@ func (s *CatracaService) EnrollFace(ctx context.Context, customerID int64) (mode
 		return models.GateMember{}, newErr(CodeStateConflict, "Já há um cadastro de rosto em andamento no leitor.")
 	}
 	defer s.enrollMu.Unlock()
-	c, dev := s.current()
-	if c.DeviceHost == "" {
-		return models.GateMember{}, invalid("Configure o IP do iDFace antes de cadastrar rostos.")
-	}
-	m, err := s.member(ctx, customerID)
+	m, dev, err := s.enrollTarget(ctx, customerID)
 	if err != nil {
 		return m, err
-	}
-	if !m.Active {
-		return m, newErr(CodeCustomerInactive, "O cliente %s está inativo.", m.Name)
-	}
-	if m.DeviceUserID == nil {
-		// A matrícula no aparelho é C + código do cliente: a importação liga por ela.
-		id, err := dev.CreateUser(ctx, m.Name, "C"+strconv.FormatInt(m.CustomerID, 10))
-		if err != nil {
-			return m, deviceErr(err)
-		}
-		if err := s.repo.SetDevice(ctx, s.DB, m.CustomerID, &id, s.Now()); err != nil {
-			return m, fromRepo(err, nil, "Este usuário do leitor já está ligado a outro cliente.")
-		}
-		m.DeviceUserID = &id
 	}
 	if err := dev.EnrollFace(ctx, *m.DeviceUserID); err != nil {
 		return m, deviceErr(err)
@@ -709,7 +766,7 @@ func (s *CatracaService) EnrollFace(ctx context.Context, customerID int64) (mode
 
 // RemoveFace apaga o aluno do leitor e desfaz o vínculo. Exige a permissão da catraca.
 func (s *CatracaService) RemoveFace(ctx context.Context, customerID int64) (models.GateMember, error) {
-	if _, err := requirePerm(ctx, s.Now(), PermGate); err != nil {
+	if _, err := requirePerm(ctx, s.Now(), PermGateFace); err != nil {
 		return models.GateMember{}, err
 	}
 	m, err := s.member(ctx, customerID)
@@ -732,7 +789,7 @@ func (s *CatracaService) RemoveFace(ctx context.Context, customerID int64) (mode
 // assinaturas ativas e desativa o cliente. Vendas, mensalidades e passagens
 // ficam guardadas; "Reativar" (Assinaturas) traz de volta. Exige a permissão da catraca.
 func (s *CatracaService) RemoveMember(ctx context.Context, customerID int64) error {
-	if _, err := requirePerm(ctx, s.Now(), PermGate); err != nil {
+	if _, err := requirePerm(ctx, s.Now(), PermGateRemove); err != nil {
 		return err
 	}
 	m, err := s.member(ctx, customerID)
@@ -748,7 +805,7 @@ func (s *CatracaService) RemoveMember(ctx context.Context, customerID int64) err
 	}
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		now := s.Now()
-		authBy, err := requirePerm(ctx, now, PermGate)
+		authBy, err := requirePerm(ctx, now, PermGateRemove)
 		if err != nil {
 			return err
 		}
@@ -853,7 +910,7 @@ func normName(n string) string { return strings.ToLower(strings.Join(strings.Fie
 // do cliente>" e, se não houver, pelo nome igual (só quando um único cliente
 // tem esse nome); quem não casa vira cliente novo. Exige a permissão da catraca.
 func (s *CatracaService) ImportFromDevice(ctx context.Context) (models.GateImport, error) {
-	if _, err := requirePerm(ctx, s.Now(), PermGate); err != nil {
+	if _, err := requirePerm(ctx, s.Now(), PermGateConfig); err != nil {
 		return models.GateImport{}, err
 	}
 	c, dev := s.current()

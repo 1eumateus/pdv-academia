@@ -26,11 +26,11 @@ type PurgeService struct{ Base }
 func NewPurgeService(b Base) *PurgeService { return &PurgeService{Base: b} }
 
 // Tabelas cujas linhas a limpeza apaga (e cujos gatilhos de não-apagar saem por um instante).
-var purgeTables = []string{"sales", "sale_items", "sale_payments", "sale_deliveries", "stock_movements", "cash_movements", "cash_sessions"}
+var purgeTables = []string{"sales", "sale_items", "sale_payments", "sale_payment_changes", "sale_deliveries", "stock_movements", "cash_movements", "cash_sessions"}
 
 // Preview mostra o que seria apagado (e o que impede). Não muda nada.
 func (s *PurgeService) Preview(ctx context.Context, date string, userID int64) (models.TestPurge, error) {
-	if _, err := requirePerm(ctx, s.Now(), PermUsers); err != nil {
+	if _, err := requirePerm(ctx, s.Now(), PermPurge); err != nil {
 		return models.TestPurge{}, err
 	}
 	return s.plan(ctx, s.DB, date, userID)
@@ -161,7 +161,7 @@ func (s *PurgeService) Apply(ctx context.Context, date string, userID int64, exp
 	var out models.TestPurge
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		now := s.Now()
-		authBy, err := requirePerm(ctx, now, PermUsers)
+		authBy, err := requirePerm(ctx, now, PermPurge)
 		if err != nil {
 			return err
 		}
@@ -225,6 +225,7 @@ func (s *PurgeService) Apply(ctx context.Context, date string, userID int64, exp
 				 WHERE track_stock = 1 AND id IN (SELECT product_id FROM stock_movements WHERE reference_type = 'sale' AND reference_id IN ` + sales + `)`,
 				`DELETE FROM stock_movements WHERE reference_type = 'sale' AND reference_id IN ` + sales,
 				`DELETE FROM cash_movements WHERE session_id IN ` + sess + ` OR (reference_type = 'sale' AND reference_id IN ` + sales + `)`,
+				`DELETE FROM sale_payment_changes WHERE sale_id IN ` + sales,
 				`DELETE FROM sale_payments WHERE sale_id IN ` + sales,
 				`DELETE FROM sale_items WHERE sale_id IN ` + sales,
 				`DELETE FROM sale_deliveries WHERE sale_id IN ` + sales,
@@ -248,10 +249,12 @@ func (s *PurgeService) Apply(ctx context.Context, date string, userID int64, exp
 	return out, err
 }
 
-// withoutDeleteGuards tira os gatilhos que proíbem apagar nessas tabelas, roda
-// fn e os recria com o mesmo SQL. Tudo dentro de tx: se fn falhar, eles voltam.
+// withoutDeleteGuards tira os gatilhos que proíbem apagar nessas tabelas (os
+// *_no_delete e qualquer outro BEFORE DELETE, como o dos itens de devolução),
+// roda fn e os recria com o mesmo SQL. Tudo dentro de tx: se fn falhar, eles voltam.
 func withoutDeleteGuards(ctx context.Context, tx *sql.Tx, tables []string, fn func() error) error {
-	rows, err := tx.QueryContext(ctx, `SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND name LIKE '%\_no\_delete' ESCAPE '\'
+	rows, err := tx.QueryContext(ctx, `SELECT name, sql FROM sqlite_master WHERE type = 'trigger'
+		AND (name LIKE '%\_no\_delete' ESCAPE '\' OR UPPER(sql) LIKE '%BEFORE DELETE ON%')
 		AND tbl_name IN ('`+strings.Join(tables, "','")+`')`)
 	if err != nil {
 		return err

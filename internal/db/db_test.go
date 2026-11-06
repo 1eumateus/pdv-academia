@@ -322,3 +322,37 @@ func TestBackupBeforeUpgrade(t *testing.T) {
 		t.Fatalf("deveria haver um backup antes da atualização: %v", matches)
 	}
 }
+
+// Um número 38 antigo já circulou sem a tabela da troca de forma de pagamento:
+// ela precisa aparecer mesmo assim, sem afetar quem já a tem.
+func TestPaymentChangesCreatedOnOldVersion38(t *testing.T) {
+	conn, err := sql.Open("sqlite", DSN(filepath.Join(t.TempDir(), "pdv.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	ctx := context.Background()
+	if err := migrate(ctx, conn, Migrations()[:37]); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, conn, `PRAGMA user_version = 38`)
+	for range 2 { // a segunda passada não pode mudar nem falhar
+		if err := Migrate(ctx, conn); err != nil {
+			t.Fatal(err)
+		}
+		var tables, guarded int
+		if err := conn.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sale_payment_changes'`).Scan(&tables); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger'
+			AND name IN ('tr_sales_values_immutable', 'tr_sale_payments_no_update', 'tr_cash_movements_no_update') AND sql LIKE '%sale_payment_changes%'`).Scan(&guarded); err != nil {
+			t.Fatal(err)
+		}
+		if tables != 1 || guarded != 3 {
+			t.Fatalf("tabelas %d, travas %d", tables, guarded)
+		}
+	}
+	if v, _ := UserVersion(ctx, conn); v != 38 {
+		t.Fatalf("versão %d", v)
+	}
+}

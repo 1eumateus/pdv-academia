@@ -66,6 +66,10 @@ export function ChangeOwnPassword(arg1, arg2) {
   return window['go']['main']['App']['ChangeOwnPassword'](arg1, arg2);
 }
 
+export function ChangeSalePaymentMethod(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ChangeSalePaymentMethod'](arg1, arg2, arg3);
+}
+
 export function ChangeSubscriptionPlan(arg1, arg2, arg3) {
   return window['go']['main']['App']['ChangeSubscriptionPlan'](arg1, arg2, arg3);
 }
@@ -162,8 +166,16 @@ export function DuplicateQuote(arg1) {
   return window['go']['main']['App']['DuplicateQuote'](arg1);
 }
 
+export function EndSubscriptionExemption(arg1) {
+  return window['go']['main']['App']['EndSubscriptionExemption'](arg1);
+}
+
 export function EnrollFace(arg1) {
   return window['go']['main']['App']['EnrollFace'](arg1);
+}
+
+export function EnrollFacePhoto(arg1, arg2) {
+  return window['go']['main']['App']['EnrollFacePhoto'](arg1, arg2);
 }
 
 export function ExportSavedReport(arg1) {
@@ -540,6 +552,14 @@ export function PrintReceipt(arg1, arg2) {
 
 export function ProductsForSale(arg1) {
   return window['go']['main']['App']['ProductsForSale'](arg1);
+}
+
+export function PurgeCustomer(arg1, arg2) {
+  return window['go']['main']['App']['PurgeCustomer'](arg1, arg2);
+}
+
+export function PurgeCustomerPreview(arg1) {
+  return window['go']['main']['App']['PurgeCustomerPreview'](arg1);
 }
 
 export function QuitApp() {

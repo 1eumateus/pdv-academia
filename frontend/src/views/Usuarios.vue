@@ -27,6 +27,24 @@ const form = reactive({
   permissions: [] as string[], busy: false, error: '',
 })
 
+// Grupos na ordem do catálogo: a caixa do grupo (principal) marca ou desmarca
+// todas as secundárias; cada secundária também vale sozinha.
+const groups = computed(() => {
+  const out: { name: string; items: models.PermissionItem[] }[] = []
+  for (const p of catalog.value?.items ?? []) {
+    const last = out[out.length - 1]
+    if (last?.name === p.group) last.items.push(p)
+    else out.push({ name: p.group, items: [p] })
+  }
+  return out
+})
+const marked = (items: models.PermissionItem[]) => items.filter((p) => form.permissions.includes(p.key)).length
+function toggleGroup(items: models.PermissionItem[], on: boolean) {
+  const keys = items.map((p) => p.key)
+  form.permissions = on ? [...new Set([...form.permissions, ...keys])] : form.permissions.filter((k) => !keys.includes(k))
+}
+const capital = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
+
 function defaultsOf(role: string): string[] {
   return [...(catalog.value?.defaults[role] ?? [])]
 }
@@ -93,9 +111,9 @@ async function save() {
     <div class="row between">
       <p class="muted" style="margin: 0">
         Cada usuário tem as próprias permissões (em <strong>Editar</strong>). Usuário novo já vem com o padrão do papel:
-        o <strong>gerente</strong> pode tudo; o <strong>operador</strong> vende, recebe, cadastra produto e dá entrada no
-        estoque. O que não for permitido não aparece para o usuário. O <strong>administrador</strong> faz tudo, inclusive
-        usuários e auditoria.
+        o <strong>gerente</strong> pode quase tudo; o <strong>operador</strong> vende, recebe, cadastra produto e dá entrada no
+        estoque. As permissões <strong>de risco</strong> (isentar, pagamento fora do caixa, apagar aluno…) nunca vêm no
+        padrão: só valem se o administrador marcar. O <strong>administrador</strong> faz tudo, inclusive usuários.
       </p>
       <button class="primary" @click="edit(null)">Novo usuário</button>
     </div>
@@ -146,15 +164,25 @@ async function save() {
         <legend class="small" style="font-weight: 600; padding: 0 4px">O que este usuário pode ver e fazer</legend>
         <p v-if="form.role === 'admin'" class="small muted" style="margin: 0">O administrador pode tudo, inclusive usuários e auditoria.</p>
         <template v-else>
-          <label v-for="p in catalog.items" :key="p.key" class="check">
-            <input v-model="form.permissions" type="checkbox" :value="p.key" /> {{ p.label.charAt(0).toUpperCase() + p.label.slice(1) }}
-          </label>
+          <div v-for="g in groups" :key="g.name" class="perm-group">
+            <label class="check perm-main">
+              <input type="checkbox" :checked="marked(g.items) === g.items.length" :indeterminate="marked(g.items) > 0 && marked(g.items) < g.items.length"
+                @change="toggleGroup(g.items, ($event.target as HTMLInputElement).checked)" />
+              <strong>{{ g.name }}</strong>
+              <span class="small muted">{{ marked(g.items) }} de {{ g.items.length }}</span>
+            </label>
+            <label v-for="p in g.items" :key="p.key" class="check perm-sub">
+              <input v-model="form.permissions" type="checkbox" :value="p.key" /> {{ capital(p.label) }}
+              <span v-if="p.risky" class="badge bad perm-risk" title="Permissão de risco: não vem no padrão de nenhum papel">risco</span>
+            </label>
+          </div>
           <div class="row" style="margin-top: 4px">
             <button type="button" class="link" @click="form.permissions = defaultsOf(form.role)">Restaurar o padrão de {{ roleLabels[form.role] }}</button>
           </div>
           <p class="small muted" style="margin: 0">
             O que estiver desmarcado não aparece para este usuário (telas, botões e campos). Para fazer, entre com um
-            usuário que tenha a permissão (Trocar usuário). Usuários e auditoria são só do administrador.
+            usuário que tenha a permissão (Trocar usuário) ou peça a autorização de quem tem. Cadastrar usuários e dar
+            permissões é sempre só do administrador.
           </p>
         </template>
       </fieldset>
@@ -166,3 +194,11 @@ async function save() {
     </form>
   </Modal>
 </template>
+
+<style scoped>
+.perm-group { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-top: 1px solid var(--border); }
+.perm-group:first-of-type { border-top: 0; padding-top: 0; }
+.perm-main { gap: 8px; }
+.perm-sub { margin-left: 24px; }
+.perm-risk { margin-left: 6px; font-size: 11px; }
+</style>

@@ -357,11 +357,30 @@ tr.clickable:hover td { background: var(--primary-soft); }
 .pix-payload { width: 100%; min-height: 70px; word-break: break-all; }
 
 /* Chips de filtro rápido (uma opção por vez, com contagem). */
-.chips { gap: 6px; }
-button.chip { min-height: auto; padding: 4px 10px; border-radius: 999px; font-size: 13px; background: var(--surface); }
-button.chip[aria-pressed='true'] { background: var(--primary); border-color: var(--primary); color: #fff; }
-.chip-count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border-radius: 999px; background: var(--tint); font-size: 11px; text-align: center; }
-button.chip[aria-pressed='true'] .chip-count { background: rgba(255, 255, 255, 0.25); }
+.chips { gap: 8px; }
+/* Filtros (controle segmentado): um trilho da altura dos campos e, dentro
+   dele, a opção escolhida vira uma pastilha em relevo. Os botões ficam em
+   .chip-track; o resto do grupo (rótulo, "Limpar filtros") fica fora. */
+.chip-track {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 3px; min-height: 38px; box-sizing: border-box;
+  background: var(--tint); border-radius: 10px;
+}
+.chip-track > button {
+  min-height: 32px; padding: 5px 13px; margin: 0; font: inherit; font-size: 13.5px; font-weight: 600; white-space: nowrap;
+  color: var(--muted); background: transparent; border: 0; border-radius: 7px; cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.chip-track > button:hover:not(:disabled):not([aria-pressed='true']) { color: var(--text); background: var(--tint); }
+.chip-track > button[aria-pressed='true'] {
+  color: var(--primary); background: var(--surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12), 0 1px 1px rgba(15, 23, 42, 0.06);
+}
+.chip-track > button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.chip-count {
+  display: inline-block; min-width: 20px; margin-left: 6px; padding: 1px 6px; border-radius: 999px;
+  background: var(--tint); color: var(--muted); font-size: 11px; font-weight: 700; text-align: center;
+}
+.chip-track > button[aria-pressed='true'] .chip-count { background: var(--primary-soft); color: var(--primary); }
 
 /* Linhas de produto com estoque zerado/baixo (Produtos e Relatórios). */
 tr.stock-zerado td { background: var(--danger-soft); }
@@ -396,3 +415,19 @@ tr.stock-baixo td { background: var(--warning-soft); }
 .delivery-toggle { font-size: 15px; font-weight: 600; }
 .delivery { gap: 8px; padding: 10px; border: 1px dashed var(--primary); border-radius: var(--radius); background: var(--primary-soft); }
 .delivery textarea { min-height: 70px; resize: vertical; }
+
+/* Menu "Mais" das linhas de tabela (ações menos usadas). */
+.more { position: relative; display: inline-block; }
+.more-menu {
+  position: absolute; right: 0; top: 100%; z-index: 20; min-width: 190px; padding: 4px;
+  display: flex; flex-direction: column; background: var(--surface, var(--bg, #fff));
+  border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+.more-menu button {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border: 0; border-radius: 6px;
+  background: transparent; text-align: left; white-space: nowrap; cursor: pointer; color: inherit; font: inherit;
+}
+.more-menu button:hover:not(:disabled) { background: var(--primary-soft, rgba(0, 0, 0, 0.06)); }
+.more-menu button:disabled { opacity: 0.5; cursor: default; }
+.more-menu .danger-text { color: var(--danger); }
+.more-menu .ok-text { color: var(--success); }

@@ -90,9 +90,11 @@ function exportXlsx() {
       <button class="ghost" :disabled="!rows.length" @click="savePdf(sheet, titles[kind])">Salvar PDF</button>
     </div>
     <div class="row chips no-print" role="group" aria-label="Mostrar">
-      <button v-for="k in kinds" :key="k.key" class="chip" :aria-pressed="kind === k.key" @click="kind = k.key">
-        {{ k.label }} <span class="chip-count">{{ countOf(k.key) }}</span>
-      </button>
+      <div class="chip-track">
+        <button v-for="k in kinds" :key="k.key" class="chip" :aria-pressed="kind === k.key" @click="kind = k.key">
+          {{ k.label }} <span class="chip-count">{{ countOf(k.key) }}</span>
+        </button>
+      </div>
     </div>
     <div v-if="error" class="alert error no-print">{{ error }}</div>
     <div v-else-if="loading && !items.length" class="state">Carregando…</div>

@@ -354,9 +354,11 @@ const opTitles: Record<StockOp, string> = { entrada: 'Entrada de estoque', ajust
       <button v-if="can('cadastrar_produto') && !stockMode" class="primary" @click="openForm()">+ Novo produto</button>
     </div>
     <div class="row chips" role="group" aria-label="Mostrar">
-      <button v-for="v in views" :key="v.key" class="chip" :aria-pressed="view === v.key" @click="view = v.key">
-        {{ v.label }} <span class="chip-count">{{ viewCount(v) }}</span>
-      </button>
+      <div class="chip-track">
+        <button v-for="v in views" :key="v.key" class="chip" :aria-pressed="view === v.key" @click="view = v.key">
+          {{ v.label }} <span class="chip-count">{{ viewCount(v) }}</span>
+        </button>
+      </div>
       <span class="spacer" />
       <span class="small muted">{{ filtered.length }} de {{ products.length }} produto(s)</span>
       <button v-if="hasFilters" class="link small" @click="clearFilters">Limpar filtros</button>

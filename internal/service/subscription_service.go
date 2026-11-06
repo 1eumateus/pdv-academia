@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"pdv/internal/actor"
@@ -40,8 +41,73 @@ func (s *SubscriptionService) List(ctx context.Context) ([]models.Subscription, 
 	today := s.Now().Format(dateLayout)
 	for i := range list {
 		list[i].Overdue = list[i].PausedAt == nil && list[i].OpenInvoice != nil && list[i].OpenInvoice.DueDate < today
+		applyExempt(&list[i], s.Now())
 	}
 	return list, err
+}
+
+// applyExempt calcula se a assinatura está isenta hoje.
+func applyExempt(v *models.Subscription, now time.Time) {
+	if v.RawExemptUntil == nil {
+		return
+	}
+	v.ExemptUntil = *v.RawExemptUntil
+	v.Exempt = v.Status == "ativa" && (v.ExemptUntil == "" || v.ExemptUntil >= now.In(Location()).Format(dateLayout))
+}
+
+// EndExemption encerra a isenção antes da hora: a mensalidade
+// em aberto, com o valor normal, passa a vencer hoje.
+func (s *SubscriptionService) EndExemption(ctx context.Context, subID int64) (models.Subscription, error) {
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		now := s.Now()
+		authBy, err := requirePerm(ctx, now, PermExempt)
+		if err != nil {
+			return err
+		}
+		sub, err := s.subs.GetByID(ctx, tx, subID)
+		if err != nil {
+			return fromRepo(err, newErr(CodeNotFound, "Assinatura %d não encontrada.", subID), "")
+		}
+		applyExempt(&sub, now)
+		if !sub.Exempt {
+			return newErr(CodeStateConflict, "A assinatura de %s não está isenta.", sub.CustomerName)
+		}
+		today := now.In(Location()).Format(dateLayout)
+		if ok, err := s.subs.SetOpenDue(ctx, tx, subID, today); err != nil {
+			return err
+		} else if !ok {
+			return newErr(CodeStateConflict, "A assinatura de %s não tem mensalidade em aberto.", sub.CustomerName)
+		}
+		if err := s.subs.ClearExempt(ctx, tx, subID); err != nil {
+			return err
+		}
+		return audit(ctx, tx, now, authBy, "isencao_encerrada", "assinatura", &subID,
+			map[string]any{"isenta_ate": sub.ExemptUntil, "motivo": sub.ExemptReason}, map[string]any{"vencimento": today})
+	})
+	if err != nil {
+		return models.Subscription{}, err
+	}
+	return s.get(ctx, subID)
+}
+
+// exemptNextDue: quando vence a próxima mensalidade da isenção. Com data, no dia
+// seguinte ao último dia isento; sem data, nunca (permanente).
+func exemptNextDue(until string, now time.Time) (string, error) {
+	if until == "" {
+		return models.PermanentExemptDue, nil
+	}
+	day, err := time.ParseInLocation(dateLayout, until, Location())
+	if err != nil {
+		return "", invalid("Data da isenção inválida.")
+	}
+	if until < now.In(Location()).Format(dateLayout) {
+		return "", invalid("A data da isenção não pode ser no passado.")
+	}
+	next := day.AddDate(0, 0, 1).Format(dateLayout)
+	if next >= models.PermanentExemptDue {
+		return "", invalid("Data da isenção muito distante. Para não ter fim, deixe a data vazia.")
+	}
+	return next, nil
 }
 
 func (s *SubscriptionService) Invoices(ctx context.Context, subID int64) ([]models.SubscriptionInvoice, error) {
@@ -241,6 +307,16 @@ func (s *SubscriptionService) Pay(ctx context.Context, in models.PayInvoiceInput
 			return models.SaleDetails{}, invalid("A fatura da assinatura é paga no caixa: use dinheiro, Pix ou cartão.")
 		}
 	}
+	reason := strings.TrimSpace(in.Reason)
+	if len([]rune(reason)) > maxReasonLen {
+		return models.SaleDetails{}, invalid("O motivo deve ter no máximo %d caracteres.", maxReasonLen)
+	}
+	if in.DiscountCents < 0 {
+		return models.SaleDetails{}, invalid("Desconto inválido.")
+	}
+	if in.Exempt && reason == "" {
+		return models.SaleDetails{}, invalid("Informe o motivo da isenção.")
+	}
 	reqID, err := cleanRequestID(in.RequestID)
 	if err != nil {
 		return models.SaleDetails{}, err
@@ -258,6 +334,13 @@ func (s *SubscriptionService) Pay(ctx context.Context, in models.PayInvoiceInput
 			}
 		}
 		now := s.Now()
+		var exemptBy *int64
+		if in.Exempt {
+			var err error
+			if exemptBy, err = requirePerm(ctx, now, PermExempt); err != nil {
+				return err
+			}
+		}
 		inv, subID, err := s.subs.OpenInvoice(ctx, tx, in.InvoiceID)
 		if err != nil {
 			return fromRepo(err, newErr(CodeStateConflict, "Esta fatura não está mais em aberto (já foi paga ou a assinatura foi cancelada)."), "")
@@ -269,6 +352,10 @@ func (s *SubscriptionService) Pay(ctx context.Context, in models.PayInvoiceInput
 		if sub.PausedAt != nil {
 			return newErr(CodeStateConflict, "A assinatura de %s está pausada. Retome antes de receber.", sub.CustomerName)
 		}
+		applyExempt(&sub, now)
+		if sub.Exempt {
+			return newErr(CodeStateConflict, "A assinatura de %s está isenta. Encerre a isenção antes de receber.", sub.CustomerName)
+		}
 		p, err := s.products.GetByID(ctx, tx, sub.ProductID)
 		if err != nil {
 			return err
@@ -276,7 +363,21 @@ func (s *SubscriptionService) Pay(ctx context.Context, in models.PayInvoiceInput
 		amount := inv.AmountCents
 		line := saleLine{productID: p.ID, qty: 1, unitPrice: &amount,
 			name: fmt.Sprintf("%s (fatura de %s)", p.Name, brDate(inv.DueDate))}
-		if saleID, err = createSaleTx(ctx, tx, s.Now, []saleLine{line}, in.PaymentMethod, in.Payments, &sub.CustomerID, 0, nil, reqID); err != nil {
+		discount, method, payments := in.DiscountCents, in.PaymentMethod, in.Payments
+		if in.Exempt {
+			// Venda de R$ 0,00: sem pagamento e sem lançamento no caixa.
+			if in.ExemptUntil == "" {
+				line.name += " · ISENTA (permanente)"
+			} else {
+				line.name += " · ISENTA até " + brDate(in.ExemptUntil)
+			}
+			discount, method, payments = amount, models.PaymentCash, nil
+		} else if discount > 0 && discount >= amount {
+			// Zerar a mensalidade é isenção, que é só do administrador e exige motivo.
+			return invalid("O desconto (%s) precisa ser menor que a mensalidade (%s). Para não cobrar nada, use a isenção.",
+				FormatBRL(discount), FormatBRL(amount))
+		}
+		if saleID, err = createSaleTx(ctx, tx, s.Now, []saleLine{line}, method, payments, &sub.CustomerID, discount, nil, reqID); err != nil {
 			return err
 		}
 		if ok, err := s.subs.MarkPaid(ctx, tx, inv.ID, saleID, now); err != nil {
@@ -288,15 +389,40 @@ func (s *SubscriptionService) Pay(ctx context.Context, in models.PayInvoiceInput
 		if p.PlanDays != nil {
 			days = *p.PlanDays // duração atual do plano
 		}
-		next, err := nextDue(in.NextDue, now.In(Location()), days)
+		var next string
+		if in.Exempt {
+			next, err = exemptNextDue(in.ExemptUntil, now)
+		} else {
+			next, err = nextDue(in.NextDue, now.In(Location()), days)
+		}
 		if err != nil {
 			return err
 		}
 		if err := s.subs.InsertInvoice(ctx, tx, sub.ID, next, cmpOr(sub.PriceCents, p.PriceCents), now); err != nil {
 			return err
 		}
-		return audit(ctx, tx, now, nil, "fatura_paga", "assinatura", &sub.ID, nil,
-			map[string]any{"fatura": inv.ID, "venda": saleID, "valor": amount, "proximo_vencimento": next})
+		if in.Exempt {
+			if err := s.subs.SetExempt(ctx, tx, sub.ID, in.ExemptUntil, reason); err != nil {
+				return err
+			}
+			until := in.ExemptUntil
+			if until == "" {
+				until = "permanente"
+			}
+			return audit(ctx, tx, now, exemptBy, "fatura_isenta", "assinatura", &sub.ID, nil,
+				map[string]any{"fatura": inv.ID, "venda": saleID, "valor": amount, "motivo": reason, "isenta_ate": until, "proximo_vencimento": next})
+		}
+		if err := s.subs.ClearExempt(ctx, tx, sub.ID); err != nil { // isenção que já terminou
+			return err
+		}
+		after := map[string]any{"fatura": inv.ID, "venda": saleID, "valor": amount, "proximo_vencimento": next}
+		if discount > 0 {
+			after["desconto"] = discount
+			if reason != "" {
+				after["motivo"] = reason
+			}
+		}
+		return audit(ctx, tx, now, nil, "fatura_paga", "assinatura", &sub.ID, nil, after)
 	})
 	if err != nil {
 		return models.SaleDetails{}, err
@@ -312,7 +438,7 @@ func (s *SubscriptionService) PayOutside(ctx context.Context, invoiceID int64, p
 	var subID int64
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		now := s.Now()
-		authBy, err := requirePerm(ctx, now, PermUsers) // só o administrador
+		authBy, err := requirePerm(ctx, now, PermPayOutside)
 		if err != nil {
 			return err
 		}
@@ -334,6 +460,10 @@ func (s *SubscriptionService) PayOutside(ctx context.Context, invoiceID int64, p
 		}
 		if sub.PausedAt != nil {
 			return newErr(CodeStateConflict, "A assinatura de %s está pausada. Retome antes de receber.", sub.CustomerName)
+		}
+		applyExempt(&sub, now)
+		if sub.Exempt {
+			return newErr(CodeStateConflict, "A assinatura de %s está isenta. Encerre a isenção antes de lançar o pagamento.", sub.CustomerName)
 		}
 		p, err := s.products.GetByID(ctx, tx, sub.ProductID)
 		if err != nil {
@@ -386,7 +516,7 @@ func (s *SubscriptionService) UndoOutside(ctx context.Context, invoiceID int64) 
 	var subID int64
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		now := s.Now()
-		authBy, err := requirePerm(ctx, now, PermUsers) // só o administrador
+		authBy, err := requirePerm(ctx, now, PermPayOutside)
 		if err != nil {
 			return err
 		}
@@ -455,6 +585,10 @@ func (s *SubscriptionService) ChangePlan(ctx context.Context, subID, productID, 
 		} else if !ok {
 			return newErr(CodeStateConflict, "Só dá para alterar uma assinatura ativa.")
 		}
+		// A mensalidade passou a vencer hoje: a isenção que houvesse acabou.
+		if err := s.subs.ClearExempt(ctx, tx, subID); err != nil {
+			return err
+		}
 		return audit(ctx, tx, now, nil, "assinatura_alterada", "assinatura", &subID,
 			map[string]any{"plano": sub.PlanName}, map[string]any{"plano": p.Name, "valor": p.PriceCents})
 	})
@@ -476,6 +610,12 @@ func (s *SubscriptionService) Pause(ctx context.Context, subID int64, reason str
 		authBy, err := requirePerm(ctx, now, PermPauseSubscription)
 		if err != nil {
 			return err
+		}
+		if sub, err := s.subs.GetByID(ctx, tx, subID); err == nil {
+			applyExempt(&sub, now)
+			if sub.Exempt {
+				return newErr(CodeStateConflict, "A assinatura de %s está isenta. Encerre a isenção antes de pausar.", sub.CustomerName)
+			}
 		}
 		if ok, err := s.subs.Pause(ctx, tx, subID, r, now); err != nil {
 			return err
@@ -553,6 +693,7 @@ func (s *SubscriptionService) get(ctx context.Context, id int64) (models.Subscri
 		return v, fromRepo(err, newErr(CodeNotFound, "Assinatura %d não encontrada.", id), "")
 	}
 	v.Overdue = v.PausedAt == nil && v.OpenInvoice != nil && v.OpenInvoice.DueDate < s.Now().Format(dateLayout)
+	applyExempt(&v, s.Now())
 	return v, nil
 }
 
@@ -576,6 +717,10 @@ func undoSubscriptionPayment(ctx context.Context, tx *sql.Tx, saleID int64, now 
 		return newErr(CodeStateConflict, "Esta venda pagou uma mensalidade, e a mensalidade seguinte já foi paga. Cancele primeiro o pagamento mais recente.")
 	}
 	if err := subs.UndoPayment(ctx, tx, subID, invID, subStatus == "ativa"); err != nil {
+		return err
+	}
+	// Cancelar a venda de R$ 0,00 desfaz a isenção junto.
+	if err := subs.ClearExempt(ctx, tx, subID); err != nil {
 		return err
 	}
 	return audit(ctx, tx, now, nil, "mensalidade_estornada", "assinatura", &subID, nil, map[string]any{"fatura": invID, "venda": saleID})

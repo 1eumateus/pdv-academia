@@ -1,12 +1,12 @@
 <!-- Caminho: pdv/frontend/src/components/SaleDetailsModal.vue -->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { CancelSale, GetReceipt, GetSaleDetails } from '../../wailsjs/go/main/App'
+import { CancelSale, ChangeSalePaymentMethod, GetReceipt, GetSaleDetails } from '../../wailsjs/go/main/App'
 import { firstPhone, openWhatsapp } from '../composables/charge'
 import { call, errorMessage } from '../api'
 import { storeName } from '../composables/cashState'
 import { can } from '../composables/session'
-import { formatDateTime, money, paymentLabels } from '../composables/format'
+import { formatDateTime, money, paymentLabels, saleMethodLabel } from '../composables/format'
 import { useToast } from '../composables/toast'
 import type { Receipt as ReceiptDoc, SaleDetails } from '../types'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -28,7 +28,7 @@ function sendWhatsapp() {
   if (!d) return
   const lines = d.items.map((it) => `• ${it.qty} x ${it.productNameSnapshot}: ${money(it.subtotalCents - it.discountCents)}`)
   const text = [`*Comprovante da venda nº ${d.sale.id}* — ${storeName.value}`, formatDateTime(d.sale.createdAt), ...lines,
-    `*Total: ${money(d.sale.totalCents)}* (${paymentLabels[d.sale.paymentMethod] ?? d.sale.paymentMethod})`, '_Documento não fiscal._'].join('\n')
+    `*Total: ${money(d.sale.totalCents)}* (${saleMethodLabel(d.sale)})`, '_Documento não fiscal._'].join('\n')
   // Celular do cliente cadastrado; senão o digitado na venda (entrega); senão pergunta.
   const phone = firstPhone(d.customer?.phone, d.delivery?.phone)
   if (phone) openWhatsapp(phone, text)
@@ -61,10 +61,32 @@ async function cancel(reason: string) {
     confirming.value = false
     const s = details.value.sale
     toast.success(
-      s.paymentMethod === 'fiado'
+      s.totalCents === 0
+        ? `Venda nº ${s.id} cancelada.`
+        : s.paymentMethod === 'fiado'
         ? `Venda nº ${s.id} cancelada. A dívida do cliente foi reduzida.`
         : `Venda nº ${s.id} cancelada. Estorno de ${money(s.totalCents)} registrado no caixa: faça a devolução ao cliente.`,
     )
+    emit('changed')
+  } catch (e) {
+    toast.error(errorMessage(e))
+  } finally {
+    busy.value = false
+  }
+}
+
+// Troca da forma de pagamento: uma vez por venda, com motivo.
+const changing = ref({ open: false, method: '', reason: '' })
+function openChange() {
+  changing.value = { open: true, method: details.value?.paymentChangeMethods?.[0] ?? '', reason: '' }
+}
+async function changePayment() {
+  busy.value = true
+  try {
+    await call(ChangeSalePaymentMethod(props.saleId, changing.value.method, changing.value.reason))
+    await load()
+    changing.value.open = false
+    toast.success(`Forma de pagamento da venda nº ${props.saleId} alterada para ${paymentLabels[changing.value.method]}.`)
     emit('changed')
   } catch (e) {
     toast.error(errorMessage(e))
@@ -101,7 +123,7 @@ const returning = ref(false)
             {{ details.sale.status === 'cancelada' ? 'Cancelada' : 'Concluída' }}
           </span>
           <span class="muted small">{{ formatDateTime(details.sale.createdAt) }}</span>
-          <span class="muted small">· {{ paymentLabels[details.sale.paymentMethod] }}</span>
+          <span class="muted small">· {{ saleMethodLabel(details.sale) }}</span>
           <span v-if="details.sale.customerName" class="muted small">· {{ details.sale.customerName }}</span>
           <span v-if="details.sale.comandaId" class="muted small">· Comanda nº {{ details.sale.comandaId }}</span>
           <span v-if="details.sale.userName" class="muted small">· Operador: {{ details.sale.userName }}</span>
@@ -111,6 +133,9 @@ const returning = ref(false)
         </div>
         <div v-if="details.sale.status === 'cancelada'" class="alert warn">
           Cancelada em {{ formatDateTime(details.sale.cancelledAt) }}<template v-if="details.sale.cancelledByName"> por {{ details.sale.cancelledByName }}</template>. Motivo: {{ details.sale.cancellationReason }}
+        </div>
+        <div v-if="details.paymentChange" class="alert info">
+          Forma de pagamento trocada de {{ paymentLabels[details.paymentChange.fromMethod] }} para {{ paymentLabels[details.paymentChange.toMethod] }} em {{ formatDateTime(details.paymentChange.createdAt) }}<template v-if="details.paymentChange.userName"> por {{ details.paymentChange.userName }}</template><template v-if="details.paymentChange.authorizedByName"> (autorizado por {{ details.paymentChange.authorizedByName }})</template>. Motivo: {{ details.paymentChange.reason }}
         </div>
         <div class="table-wrap">
           <table>
@@ -162,6 +187,14 @@ const returning = ref(false)
       <button v-if="details && allowCancel && can('trocas_devolucoes') && details.sale.status !== 'cancelada'" @click="returning = true">
         Devolver itens
       </button>
+      <button
+        v-if="details && allowCancel && can('alterar_forma_pagamento') && details.sale.status !== 'cancelada' && !details.paymentChange"
+        :disabled="!details.paymentChangeMethods?.length"
+        :title="details.paymentChangeBlocked || 'Pode ser feito uma única vez nesta venda'"
+        @click="openChange"
+      >
+        Trocar forma de pagamento
+      </button>
       <span class="spacer" />
       <button v-if="details" title="Enviar o comprovante como texto pelo WhatsApp" @click="sendWhatsapp">WhatsApp</button>
       <button v-if="details" @click="showReceipt = !showReceipt">{{ showReceipt ? 'Ver detalhes' : 'Comprovante não fiscal' }}</button>
@@ -182,6 +215,23 @@ const returning = ref(false)
     @confirm="cancel"
     @cancel="confirming = false"
   />
+  <Modal v-if="changing.open" :title="`Trocar forma de pagamento: venda nº ${saleId}`" :busy="busy" @close="changing.open = false">
+    <form id="change-payment" class="stack" @submit.prevent="changePayment">
+      <div class="alert warn">Esta troca só pode ser feita <strong>uma única vez</strong> nesta venda, com o caixa de hoje aberto, e não pode ser desfeita. O valor não muda.</div>
+      <div class="row between"><span>Forma atual</span><strong>{{ paymentLabels[details?.sale.paymentMethod ?? ''] }}</strong></div>
+      <label class="field">Nova forma
+        <select v-model="changing.method" required>
+          <option v-for="m in details?.paymentChangeMethods" :key="m" :value="m">{{ paymentLabels[m] }}</option>
+        </select>
+      </label>
+      <label class="field">Motivo da troca<input v-model="changing.reason" type="text" required maxlength="200" /></label>
+    </form>
+    <template #footer>
+      <span class="spacer" />
+      <button :disabled="busy" @click="changing.open = false">Voltar</button>
+      <button type="submit" form="change-payment" class="primary" :disabled="busy || !changing.method || !changing.reason.trim()">Confirmar troca</button>
+    </template>
+  </Modal>
   <WhatsappAsk v-if="waText" :text="waText" @close="waText = ''" />
 </template>
 

@@ -125,9 +125,12 @@ func TestGateWithSubscription(t *testing.T) {
 		t.Fatalf("busca deveria achar o Bruno, sem plano: %+v", list)
 	}
 
-	// Manual exige motivo; passagens ficam registradas com o operador.
-	if err := gate.ManualRelease(e.ctx, "  "); codeOf(err) != CodeInvalid {
+	// Manual: o motivo é opcional; passagens ficam registradas com o operador.
+	if err := gate.ManualRelease(e.ctx, "  "); err != nil {
 		t.Fatalf("liberação sem motivo: %v", err)
+	}
+	if got := events[len(events)-1]; got.Source != "manual" || got.Reason != manualNoReason {
+		t.Fatalf("sem motivo registrado como: %+v", got)
 	}
 	if err := gate.ManualRelease(e.ctx, "Aula experimental"); err != nil {
 		t.Fatal(err)

@@ -161,6 +161,70 @@ func (SaleRepo) Payments(ctx context.Context, q DBTX, saleID int64) ([]models.Sa
 	return out, wrap(op, rows.Err())
 }
 
+// PaymentChange devolve a troca de forma de pagamento da venda (nil se não houve).
+func (SaleRepo) PaymentChange(ctx context.Context, q DBTX, saleID int64) (*models.SalePaymentChange, error) {
+	const op = "buscar troca da forma de pagamento"
+	var (
+		c            models.SalePaymentChange
+		user, author sql.NullString
+		created      string
+	)
+	err := q.QueryRowContext(ctx,
+		`SELECT c.from_method, c.to_method, c.reason, u.name, a.name, c.created_at FROM sale_payment_changes c
+		 LEFT JOIN users u ON u.id = c.user_id LEFT JOIN users a ON a.id = c.authorized_by_id WHERE c.sale_id = ?`, saleID).
+		Scan(&c.FromMethod, &c.ToMethod, &c.Reason, &user, &author, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrap(op, err)
+	}
+	c.UserName, c.AuthorizedByName = nullStr(user), nullStr(author)
+	if c.CreatedAt, err = parseTime(created); err != nil {
+		return nil, wrap(op, err)
+	}
+	return &c, nil
+}
+
+// SaleCashMovements conta os lançamentos de venda da venda no caixa.
+func (SaleRepo) SaleCashMovements(ctx context.Context, q DBTX, saleID int64) (int64, error) {
+	var n int64
+	err := q.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM cash_movements WHERE reference_type = 'sale' AND reference_id = ? AND type = 'venda'`, saleID).Scan(&n)
+	return n, wrap("contar lançamentos da venda no caixa", err)
+}
+
+// ApplyPaymentChange registra a troca e muda a forma na venda, no pagamento e no
+// caixa. As travas do banco exigem o registro antes das alterações.
+func (SaleRepo) ApplyPaymentChange(ctx context.Context, q DBTX, saleID int64, from, to string, installments int64,
+	reason string, authorizedBy *int64, now time.Time) error {
+	const op = "trocar a forma de pagamento da venda"
+	if _, err := q.ExecContext(ctx,
+		`INSERT INTO sale_payment_changes (sale_id, from_method, to_method, reason, user_id, authorized_by_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		saleID, from, to, reason, actor.ID(ctx), authorizedBy, FormatTime(now)); err != nil {
+		return wrap(op, err)
+	}
+	for _, u := range []struct {
+		query string
+		args  []any
+	}{
+		{`UPDATE sales SET payment_method = ? WHERE id = ? AND payment_method = ?`, []any{to, saleID, from}},
+		{`UPDATE sale_payments SET method = ?, received_cents = 0, card_brand = '', installments = ? WHERE sale_id = ? AND method = ?`, []any{to, installments, saleID, from}},
+		{`UPDATE cash_movements SET payment_method = ? WHERE reference_type = 'sale' AND reference_id = ? AND type = 'venda' AND payment_method = ?`, []any{to, saleID, from}},
+	} {
+		res, err := q.ExecContext(ctx, u.query, u.args...)
+		if err != nil {
+			return wrap(op, err)
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return wrap(op, err)
+		} else if n != 1 {
+			return fmt.Errorf("%s: esperava alterar 1 linha, alterou %d", op, n)
+		}
+	}
+	return nil
+}
+
 func (SaleRepo) GetByID(ctx context.Context, q DBTX, id int64) (models.Sale, error) {
 	s, err := scanSale(q.QueryRowContext(ctx, saleSelect+` WHERE s.id = ?`, id))
 	return s, wrap("buscar venda", err)

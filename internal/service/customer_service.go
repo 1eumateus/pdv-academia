@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"slices"
 	"strings"
 	"time"
 
@@ -126,12 +127,30 @@ func cleanBirthDate(in *string, now time.Time) error {
 	return nil
 }
 
+// customerGenders: os gêneros aceitos no cadastro do cliente.
+var customerGenders = []string{"feminino", "masculino", "outro"}
+
+// cleanGender: um de customerGenders. nil mantém, "" apaga.
+func cleanGender(in *string) error {
+	if in == nil {
+		return nil
+	}
+	*in = strings.ToLower(strings.TrimSpace(*in))
+	if *in != "" && !slices.Contains(customerGenders, *in) {
+		return invalid("Gênero inválido: use feminino, masculino ou outro.")
+	}
+	return nil
+}
+
 func (s *CustomerService) Create(ctx context.Context, in models.CustomerInput) (models.Customer, error) {
 	f, err := validateCustomer(in)
 	if err != nil {
 		return models.Customer{}, err
 	}
 	if err := cleanBirthDate(in.BirthDate, s.Now()); err != nil {
+		return models.Customer{}, err
+	}
+	if err := cleanGender(in.Gender); err != nil {
 		return models.Customer{}, err
 	}
 	var out models.Customer
@@ -149,6 +168,11 @@ func (s *CustomerService) Create(ctx context.Context, in models.CustomerInput) (
 		}
 		if b := trimPtr(in.BirthDate); b != nil {
 			if err := s.customers.SetBirthDate(ctx, tx, id, b); err != nil {
+				return err
+			}
+		}
+		if g := trimPtr(in.Gender); g != nil {
+			if err := s.customers.SetGender(ctx, tx, id, g); err != nil {
 				return err
 			}
 		}
@@ -175,6 +199,9 @@ func (s *CustomerService) Update(ctx context.Context, in models.CustomerInput) (
 	if err := cleanBirthDate(in.BirthDate, s.Now()); err != nil {
 		return models.Customer{}, err
 	}
+	if err := cleanGender(in.Gender); err != nil {
+		return models.Customer{}, err
+	}
 	var out models.Customer
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		before, err := s.customers.GetByID(ctx, tx, in.ID)
@@ -196,6 +223,11 @@ func (s *CustomerService) Update(ctx context.Context, in models.CustomerInput) (
 		}
 		if in.BirthDate != nil && strings.TrimSpace(*in.BirthDate) != str(before.BirthDate) {
 			if err := s.customers.SetBirthDate(ctx, tx, in.ID, trimPtr(in.BirthDate)); err != nil {
+				return err
+			}
+		}
+		if in.Gender != nil && *in.Gender != str(before.Gender) {
+			if err := s.customers.SetGender(ctx, tx, in.ID, trimPtr(in.Gender)); err != nil {
 				return err
 			}
 		}

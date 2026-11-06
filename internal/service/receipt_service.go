@@ -278,7 +278,11 @@ func (s *ReceiptService) sale(ctx context.Context, b *builder, st models.Setting
 		hasFiado = hasFiado || p.Method == models.PaymentCredit
 	}
 	if len(d.Payments) == 0 {
-		b.pair("Pagamento", methodLabels[sale.PaymentMethod], false)
+		label := methodLabels[sale.PaymentMethod]
+		if sale.TotalCents == 0 {
+			label = "Sem pagamento"
+		}
+		b.pair("Pagamento", label, false)
 	}
 	// Devoluções desta venda: o que voltou, quanto e como foi reembolsado.
 	if len(d.Returns) > 0 {
@@ -532,6 +536,15 @@ func (s *ReceiptService) report(ctx context.Context, b *builder, st models.Setti
 		for _, t := range r.ByPaymentMethod {
 			b.pair(fmt.Sprintf("  %s (%d)", methodLabels[t.PaymentMethod], t.Count), brl(t.TotalCents), false)
 		}
+	}
+	if show(models.ReportByPayment) && len(r.Withdrawals) > 0 {
+		b.sep()
+		b.text("Retiradas (sangria):")
+		for _, w := range r.Withdrawals {
+			b.text("  " + w.At.Local().Format("02/01 15:04") + " " + withdrawalLabel(w))
+			b.pair("", brl(-w.AmountCents), false)
+		}
+		b.pair("Dinheiro após retiradas", brl(r.CashAfterWithdrawals), true)
 	}
 	if show(models.ReportByCategory) && len(r.ByCategory) > 0 {
 		b.sep()

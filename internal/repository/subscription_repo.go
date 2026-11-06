@@ -16,7 +16,8 @@ type SubscriptionRepo struct{}
 // subSelect traz a assinatura com a fatura aberta (se houver) e o último pagamento.
 const subSelect = `SELECT s.id, s.customer_id, c.name, c.phone, s.product_id, p.name, COALESCE(p.plan_days, 0), s.price_cents, s.status, s.created_at, s.cancelled_at,
 	i.id, i.due_date, i.amount_cents, s.paused_at, s.pause_reason,
-	(SELECT MAX(paid_at) FROM subscription_invoices WHERE subscription_id = s.id AND status = 'paga'), r.dias, r.vezes_semana, r.entradas_dia
+	(SELECT MAX(paid_at) FROM subscription_invoices WHERE subscription_id = s.id AND status = 'paga'), r.dias, r.vezes_semana, r.entradas_dia,
+	s.exempt_until, s.exempt_reason
 	FROM subscriptions s JOIN customers c ON c.id = s.customer_id JOIN products p ON p.id = s.product_id
 	LEFT JOIN subscription_invoices i ON i.subscription_id = s.id AND i.status = 'aberta'
 	LEFT JOIN catraca_regras r ON r.subscription_id = s.id`
@@ -33,12 +34,14 @@ func scanSub(s interface{ Scan(...any) error }) (models.Subscription, error) {
 		price               sql.NullInt64
 		days                sql.NullString
 		weekly, daily       sql.NullInt64
+		exemptUntil, exempt sql.NullString
 		err                 error
 	)
 	if err = s.Scan(&v.ID, &v.CustomerID, &v.CustomerName, &phone, &v.ProductID, &v.PlanName, &v.PlanDays, &price, &v.Status, &created, &cancelled,
-		&invID, &invDue, &invAmount, &paused, &reason, &lastPaid, &days, &weekly, &daily); err != nil {
+		&invID, &invDue, &invAmount, &paused, &reason, &lastPaid, &days, &weekly, &daily, &exemptUntil, &exempt); err != nil {
 		return v, err
 	}
+	v.RawExemptUntil, v.ExemptReason = nullStr(exemptUntil), exempt.String
 	if days.Valid { // linha em catraca_regras: exceção da assinatura
 		r := rulesFrom(days, weekly, daily)
 		v.Rules = &r
@@ -141,6 +144,28 @@ func (SubscriptionRepo) UndoPayment(ctx context.Context, q DBTX, subID, invoiceI
 	_, err := q.ExecContext(ctx, `UPDATE subscription_invoices SET status = ?, sale_id = NULL, paid_at = NULL, imported = 0 WHERE id = ? AND status = 'paga'`,
 		status, invoiceID)
 	return wrap(op, err)
+}
+
+// SetExempt grava a isenção: until vazio = permanente, data = isenta até o dia.
+func (SubscriptionRepo) SetExempt(ctx context.Context, q DBTX, subID int64, until, reason string) error {
+	_, err := q.ExecContext(ctx, `UPDATE subscriptions SET exempt_until = ?, exempt_reason = ? WHERE id = ?`, until, reason, subID)
+	return wrap("gravar isenção da assinatura", err)
+}
+
+// ClearExempt tira a marca de isenção da assinatura.
+func (SubscriptionRepo) ClearExempt(ctx context.Context, q DBTX, subID int64) error {
+	_, err := q.ExecContext(ctx, `UPDATE subscriptions SET exempt_until = NULL, exempt_reason = NULL WHERE id = ?`, subID)
+	return wrap("tirar isenção da assinatura", err)
+}
+
+// SetOpenDue muda o vencimento da mensalidade em aberto.
+func (SubscriptionRepo) SetOpenDue(ctx context.Context, q DBTX, subID int64, due string) (bool, error) {
+	res, err := q.ExecContext(ctx, `UPDATE subscription_invoices SET due_date = ? WHERE subscription_id = ? AND status = 'aberta'`, due, subID)
+	if err != nil {
+		return false, wrap("mudar vencimento da mensalidade", err)
+	}
+	n, err := res.RowsAffected()
+	return n > 0, wrap("mudar vencimento da mensalidade", err)
 }
 
 // InsertImported cria a assinatura vinda de outro sistema (cancelledAt vazio = ativa).

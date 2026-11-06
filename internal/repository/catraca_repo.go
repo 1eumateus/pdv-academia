@@ -97,11 +97,15 @@ func (r CatracaRepo) MemberByDevice(ctx context.Context, q DBTX, deviceUserID in
 	return r.memberWhere(ctx, q, "a.device_user_id = ?", deviceUserID)
 }
 
-// Members lista por nome. Sem busca: quem tem plano ativo ou já tem cadastro
-// na catraca, menos os funcionários. Com busca: qualquer cliente ativo (para cadastrar o rosto).
+// Members lista por nome. Sem busca: quem já teve assinatura (ativa ou não:
+// os ex-alunos aparecem como inativos, menos quem foi apagado: cliente
+// desativado) ou tem cadastro na catraca, menos os
+// funcionários. Com busca: qualquer cliente ativo (para cadastrar o rosto).
 func (r CatracaRepo) Members(ctx context.Context, q DBTX, term string) ([]models.GateMember, error) {
 	term = strings.TrimSpace(term)
-	where := ` WHERE a.funcao IS NULL AND (a.customer_id IS NOT NULL OR EXISTS (SELECT 1 FROM subscriptions s WHERE s.customer_id = c.id AND s.status = 'ativa'))`
+	where := ` WHERE a.funcao IS NULL AND (a.customer_id IS NOT NULL OR
+		(EXISTS (SELECT 1 FROM subscriptions s WHERE s.customer_id = c.id AND s.status = 'ativa')) OR
+		(c.active = 1 AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.customer_id = c.id)))`
 	var args []any
 	if term != "" {
 		like := "%" + escapeLike(term) + "%"

@@ -91,6 +91,11 @@ export function today(offsetDays = 0): string {
   return `${d.getFullYear()}-${m}-${day}`
 }
 
+// Forma de uma venda: venda de R$ 0,00 (mensalidade isenta) não teve pagamento.
+export function saleMethodLabel(s: { paymentMethod: string; totalCents: number }) {
+  return s.totalCents === 0 ? 'Sem pagamento' : paymentLabels[s.paymentMethod] ?? s.paymentMethod
+}
+
 export const paymentLabels: Record<string, string> = {
   dinheiro: 'Dinheiro',
   pix: 'Pix',

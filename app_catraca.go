@@ -72,6 +72,23 @@ func (a *App) EnrollFace(customerID int64) (models.GateMember, error) {
 	})
 }
 
+// EnrollFacePhoto cadastra o rosto por foto. photo: a imagem em base64 (com ou
+// sem o prefixo "data:image/...;base64,").
+func (a *App) EnrollFacePhoto(customerID int64, photo string) (models.GateMember, error) {
+	return call(a, "cadastrar rosto por foto", func(ctx context.Context) (models.GateMember, error) {
+		if i := strings.Index(photo, ","); strings.HasPrefix(photo, "data:") && i > 0 {
+			photo = photo[i+1:]
+		}
+		img, err := base64.StdEncoding.DecodeString(photo)
+		if err != nil {
+			return models.GateMember{}, fmt.Errorf("foto inválida: %w", err)
+		}
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+		defer cancel()
+		return a.gate.EnrollFacePhoto(ctx, customerID, img)
+	})
+}
+
 func (a *App) RemoveFace(customerID int64) (models.GateMember, error) {
 	return call(a, "remover rosto", func(ctx context.Context) (models.GateMember, error) { return a.gate.RemoveFace(ctx, customerID) })
 }

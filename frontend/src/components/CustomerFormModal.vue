@@ -28,7 +28,7 @@ if (c) {
 }
 const form = reactive({
   id: c?.id ?? 0, name: c?.name ?? '', ...opt,
-  limit: centsToInput(c?.creditLimitCents ?? 0), active: c?.active ?? true, birthDate: c?.birthDate ?? '', busy: false, error: '',
+  limit: centsToInput(c?.creditLimitCents ?? 0), active: c?.active ?? true, birthDate: c?.birthDate ?? '', gender: c?.gender ?? '', busy: false, error: '',
 })
 
 async function save() {
@@ -39,7 +39,7 @@ async function save() {
   form.error = ''
   try {
     const o = Object.fromEntries(optionalFields.map((k) => [k, form[k].trim() || null]))
-    const input = models.CustomerInput.createFrom({ id: form.id, name: form.name, ...o, creditLimitCents: limit, active: form.active, birthDate: form.birthDate })
+    const input = models.CustomerInput.createFrom({ id: form.id, name: form.name, ...o, creditLimitCents: limit, active: form.active, birthDate: form.birthDate, gender: form.gender })
     const saved = await call(form.id ? UpdateCustomer(input) : CreateCustomer(input))
     toast.success(form.id ? `Cliente "${saved.name}" atualizado.` : `Cliente "${saved.name}" cadastrado.`)
     emit('saved', saved)
@@ -62,6 +62,14 @@ async function save() {
         <label class="field">Telefone<input v-model="form.phone" maxlength="30" inputmode="tel" /></label>
         <label class="field">E-mail<input v-model="form.email" maxlength="254" type="email" /></label>
         <label class="field">Data de nascimento (opcional)<input v-model="form.birthDate" type="date" /></label>
+        <label class="field">Gênero (opcional)
+          <select v-model="form.gender">
+            <option value="">Não informado</option>
+            <option value="feminino">Feminino</option>
+            <option value="masculino">Masculino</option>
+            <option value="outro">Outro</option>
+          </select>
+        </label>
       </div>
       <fieldset class="stack" style="border: 1px solid var(--border); border-radius: 8px; padding: 12px">
         <legend class="small muted" style="padding: 0 6px">Endereço (para entregas)</legend>

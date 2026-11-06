@@ -7,7 +7,7 @@
 // aluno é um formulário.
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
-  CancelSubscription, ChangeSubscriptionPlan, CreateSubscription, GateCheckAndRelease, ListPlanRules, ListProducts, PauseSubscription,
+  CancelSubscription, ChangeSubscriptionPlan, CreateSubscription, EndSubscriptionExemption, GateCheckAndRelease, ListPlanRules, ListProducts, PauseSubscription,
   PaySubscriptionInvoice, PaySubscriptionOutside, ReactivateSubscription, ResumeSubscription, SetSubscriptionRules, UndoSubscriptionOutside,
 } from '../../wailsjs/go/main/App'
 import { call, errorMessage, newRequestId } from '../api'
@@ -73,11 +73,31 @@ const split = ref(false)
 const payBusy = ref(false)
 const payError = ref('')
 const requestId = ref('')
-const payTotal = computed(() => paying.value?.openInvoice?.amountCents ?? 0)
+const payAmount = computed(() => paying.value?.openInvoice?.amountCents ?? 0)
+// Desconto ao receber e isenção (com motivo; isentar exige a permissão).
+const discountText = ref('')
+const payReason = ref('')
+const exempt = ref(false)
+const exemptUntil = ref('') // vazio = permanente
+const discount = computed(() => (discountText.value.trim() === '' ? 0 : parseMoney(discountText.value)))
+const discountError = computed(() => {
+  if (discount.value === null) return 'Desconto inválido. Exemplo: 10,00'
+  if (discount.value > 0 && discount.value >= payAmount.value) return 'O desconto precisa ser menor que a mensalidade.'
+  return ''
+})
+const payTotal = computed(() => Math.max(payAmount.value - (discountError.value ? 0 : discount.value ?? 0), 0))
 const pay = computed(() => evaluate(parts.value, payTotal.value, split.value))
+// Pagar de verdade: nem isenção, nem baixa fora do caixa.
+const charging = computed(() => !outside.value && !exempt.value)
+const payBlocked = computed(() => {
+  if (exempt.value) return !payReason.value.trim()
+  if (outside.value) return false
+  return !!discountError.value || !!pay.value.error
+})
 const receipt = ref<number | null>(null)
-// Fora do caixa: pagamento retroativo de um caixa já fechado à mão. Só o administrador.
-const canOutside = computed(() => can('gerenciar_usuarios'))
+// Fora do caixa: pagamento retroativo de um caixa já fechado à mão. Isenção: não cobrar.
+const canOutside = computed(() => can('pagamento_fora_caixa'))
+const canExempt = computed(() => can('isentar_assinatura'))
 const outside = ref(false)
 const paidDate = ref(today())
 // Próximo vencimento: sugere pagamento + duração do plano; pode ser trocado.
@@ -92,6 +112,9 @@ function suggestNext() {
   if (!nextEdited.value && paying.value) nextDue.value = addDays(outside.value ? paidDate.value || today() : today(), paying.value.planDays)
 }
 watch([outside, paidDate], suggestNext)
+// Isenção e baixa fora do caixa são caminhos diferentes: marcar um desmarca o outro.
+watch(outside, (v) => { if (v) exempt.value = false })
+watch(exempt, (v) => { if (v) outside.value = false })
 
 function openPay(s: Sub) {
   paying.value = s
@@ -100,13 +123,17 @@ function openPay(s: Sub) {
   payError.value = ''
   requestId.value = newRequestId()
   outside.value = false
+  exempt.value = false
+  exemptUntil.value = ''
+  discountText.value = ''
+  payReason.value = ''
   paidDate.value = today()
   nextEdited.value = false
   suggestNext()
 }
 async function confirmPay() {
   const s = paying.value
-  if (!s?.openInvoice || (!outside.value && pay.value.error) || payBusy.value) return
+  if (!s?.openInvoice || payBlocked.value || payBusy.value) return
   payBusy.value = true
   payError.value = ''
   try {
@@ -118,9 +145,12 @@ async function confirmPay() {
       return
     }
     const sale = await call(PaySubscriptionInvoice(models.PayInvoiceInput.createFrom({
-      invoiceId: s.openInvoice.id, paymentMethod: parts.value[0]?.method ?? 'dinheiro', payments: pay.value.payments, requestId: requestId.value, nextDue: nextDue.value,
+      invoiceId: s.openInvoice.id, paymentMethod: parts.value[0]?.method ?? 'dinheiro', payments: exempt.value ? [] : pay.value.payments, requestId: requestId.value, nextDue: nextDue.value,
+      discountCents: exempt.value ? 0 : discount.value ?? 0, exempt: exempt.value, exemptUntil: exempt.value ? exemptUntil.value : '', reason: payReason.value,
     })))
-    toast.success(`Fatura de ${s.customerName} recebida. A próxima vence em ${brDate(nextDue.value)}.`)
+    toast.success(exempt.value
+      ? `${s.customerName} isenta${exemptUntil.value ? ` até ${brDate(exemptUntil.value)}` : ' de forma permanente'}.`
+      : `Fatura de ${s.customerName} recebida. A próxima vence em ${brDate(nextDue.value)}.`)
     paying.value = null
     if (autoReceipt.value) receipt.value = sale.sale.id
     emit('changed')
@@ -130,6 +160,25 @@ async function confirmPay() {
     payBusy.value = false
   }
 }
+
+// ---------- encerrar isenção ----------
+const endExemptAsk = ref<Sub | null>(null)
+const endExemptBusy = ref(false)
+async function confirmEndExempt() {
+  if (!endExemptAsk.value) return
+  endExemptBusy.value = true
+  try {
+    const s = await call(EndSubscriptionExemption(endExemptAsk.value.id))
+    toast.success(`Isenção de ${s.customerName} encerrada. A mensalidade de ${money(s.openInvoice?.amountCents ?? 0)} vence hoje.`)
+    endExemptAsk.value = null
+    emit('changed')
+  } catch (e) {
+    toast.error(errorMessage(e))
+  } finally {
+    endExemptBusy.value = false
+  }
+}
+const askEndExempt = (s: Sub) => (endExemptAsk.value = s)
 
 async function undoOutside(invoiceId: number) {
   try {
@@ -247,7 +296,7 @@ async function cancel() {
 }
 const askCancel = (s: Sub) => (cancelAsk.value = s)
 
-defineExpose({ openCreate, openPay, openChange, openPause, resume, reactivate, release, askCancel, undoOutside, reactivating, canPause, noPauseTip, canOutside, plans })
+defineExpose({ openCreate, openPay, openChange, openPause, resume, reactivate, release, askCancel, askEndExempt, undoOutside, reactivating, canPause, noPauseTip, canOutside, canExempt, plans })
 </script>
 
 <template>
@@ -274,16 +323,34 @@ defineExpose({ openCreate, openPay, openChange, openPause, resume, reactivate, r
 
     <Modal v-if="paying?.openInvoice" :title="`Receber fatura de ${paying.customerName}`" :busy="payBusy" @close="paying = null">
       <form class="stack" @submit.prevent="confirmPay">
-        <p style="margin: 0">{{ paying.planName }} · vencimento {{ brDate(paying.openInvoice.dueDate) }} · <strong class="mono">{{ money(payTotal) }}</strong></p>
+        <p style="margin: 0">{{ paying.planName }} · vencimento {{ brDate(paying.openInvoice.dueDate) }} · <strong class="mono">{{ money(payAmount) }}</strong></p>
         <label v-if="canOutside" class="check"><input v-model="outside" type="checkbox" /> Já foi pago fora do caixa (não lançar no caixa)</label>
+        <label v-if="canExempt" class="check"><input v-model="exempt" type="checkbox" /> Isentar de pagamento (não cobrar nada)</label>
         <label v-if="outside" class="field">Pago em<input v-model="paidDate" type="date" :max="today()" required /></label>
         <p v-if="outside" class="small muted" style="margin: 0">A mensalidade fica paga sem venda e sem mexer no caixa (ex.: caixa já fechado à mão). A catraca libera normalmente.</p>
-        <PaymentPanel v-else v-model:parts="parts" v-model:split="split" :total="payTotal" :busy="payBusy" :exclude="['fiado']" />
-        <label class="field">Próximo vencimento<input v-model="nextDue" type="date" required @input="nextEdited = true" /></label>
+        <template v-if="exempt">
+          <label class="field">Isenta até (vazio = permanente)<input v-model="exemptUntil" type="date" :min="today()" /></label>
+          <label class="field">Motivo da isenção<input v-model="payReason" maxlength="200" required placeholder="Ex.: funcionário, cortesia" /></label>
+          <p class="small muted" style="margin: 0">
+            <template v-if="exemptUntil">A cobrança volta em {{ brDate(addDays(exemptUntil, 1)) }}, com o valor normal.</template>
+            <template v-else><strong>Sem data, a isenção é permanente</strong>: não gera cobrança até alguém com a permissão encerrar.</template>
+            A catraca libera normalmente. Fica registrada uma venda de R$ 0,00, sem entrada no caixa.
+          </p>
+        </template>
+        <template v-if="charging">
+          <div class="row">
+            <label class="field">Desconto (R$)<input v-model="discountText" inputmode="decimal" placeholder="0,00" /></label>
+            <label v-if="(discount ?? 0) > 0" class="field" style="flex: 1">Motivo do desconto (opcional)<input v-model="payReason" maxlength="200" /></label>
+          </div>
+          <div v-if="discountError" class="alert error" role="alert">{{ discountError }}</div>
+          <p v-else-if="(discount ?? 0) > 0" style="margin: 0">A receber: <strong class="mono">{{ money(payTotal) }}</strong></p>
+          <PaymentPanel v-model:parts="parts" v-model:split="split" :total="payTotal" :busy="payBusy" :exclude="['fiado']" />
+        </template>
+        <label v-if="!exempt" class="field">Próximo vencimento<input v-model="nextDue" type="date" required @input="nextEdited = true" /></label>
         <div v-if="payError" class="alert error" role="alert">{{ payError }}</div>
         <footer class="row end">
           <button type="button" :disabled="payBusy" @click="paying = null">Cancelar</button>
-          <button type="submit" class="success" :disabled="payBusy || (!outside && !!pay.error)">{{ payBusy ? 'Registrando…' : outside ? 'Lançar como pago' : 'Confirmar recebimento' }}</button>
+          <button type="submit" class="success" :disabled="payBusy || payBlocked">{{ payBusy ? 'Registrando…' : outside ? 'Lançar como pago' : exempt ? 'Confirmar isenção' : 'Confirmar recebimento' }}</button>
         </footer>
       </form>
     </Modal>
@@ -302,6 +369,9 @@ defineExpose({ openCreate, openPay, openChange, openPause, resume, reactivate, r
     <ConfirmDialog v-if="cancelAsk" title="Cancelar assinatura" danger :busy="cancelBusy"
       :message="`Cancelar o plano ${cancelAsk.planName} de ${cancelAsk.customerName}? A fatura em aberto deixa de existir.`"
       confirm-label="Cancelar assinatura" cancel-label="Voltar" @confirm="cancel" @cancel="cancelAsk = null" />
+    <ConfirmDialog v-if="endExemptAsk" title="Encerrar isenção" :busy="endExemptBusy"
+      :message="`Encerrar a isenção de ${endExemptAsk.customerName}? A mensalidade de ${money(endExemptAsk.openInvoice?.amountCents ?? 0)} passa a vencer hoje.`"
+      confirm-label="Encerrar isenção" cancel-label="Voltar" @confirm="confirmEndExempt" @cancel="endExemptAsk = null" />
     <Modal v-if="change.sub" :title="`Alterar assinatura · ${change.sub.customerName}`" :busy="change.busy" @close="change.sub = null">
       <form class="stack" @submit.prevent="saveChange">
         <p style="margin: 0">Plano atual: <strong>{{ change.sub.planName }}</strong> · {{ planLabel(change.sub.planDays) }}</p>

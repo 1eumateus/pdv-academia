@@ -45,9 +45,8 @@ const groups = computed(() => [
     { to: '/catraca', label: 'Catraca', icon: 't-catraca', show: true },
     { to: '/catraca/entradas', label: 'Entradas', icon: 't-historico', show: true },
     { to: '/catraca/alunos', label: 'Alunos e rostos', icon: 't-rosto', show: true },
-    { to: '/assinaturas', label: 'Assinaturas', icon: 't-assinatura', show: true },
-    { to: '/catraca/funcionarios', label: 'Funcionários', icon: 't-usuarios', show: can('catraca') },
-    { to: '/catraca/config', label: 'Configurar catraca', icon: 'm-admin', show: can('catraca') },
+    { to: '/catraca/funcionarios', label: 'Funcionários', icon: 't-usuarios', show: can('catraca_funcionarios') },
+    { to: '/catraca/config', label: 'Configurar catraca', icon: 'm-admin', show: can('catraca_configurar') },
   ] },
   { label: 'Clientes', icon: 'm-clientes', color: '#f472b6', key: '', tabs: [
     { to: '/clientes', label: 'Clientes', icon: 'm-clientes', show: true },
@@ -67,7 +66,7 @@ const groups = computed(() => [
     { to: '/configuracoes', label: 'Configurações', icon: 'm-admin', show: can('alterar_configuracoes') || can('restaurar_backup') },
     { to: '/usuarios', label: 'Usuários', icon: 't-usuarios', show: can('gerenciar_usuarios') },
     { to: '/auditoria', label: 'Auditoria', icon: 't-auditoria', show: can('ver_auditoria') },
-    { to: '/apagar-testes', label: 'Apagar vendas de teste', icon: 'remover', show: can('gerenciar_usuarios') },
+    { to: '/apagar-testes', label: 'Apagar vendas de teste', icon: 'remover', show: can('apagar_testes') },
     { to: '/licenca', label: 'Licença', icon: 't-licenca', show: true },
   ] },
 ].map((g) => ({ ...g, tabs: g.tabs.filter((t) => t.show) })).filter((g) => g.tabs.length))

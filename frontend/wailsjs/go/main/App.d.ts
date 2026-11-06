@@ -34,6 +34,8 @@ export function CancelSubscription(arg1:number):Promise<models.Subscription>;
 
 export function ChangeOwnPassword(arg1:string,arg2:string):Promise<void>;
 
+export function ChangeSalePaymentMethod(arg1:number,arg2:string,arg3:string):Promise<models.SaleDetails>;
+
 export function ChangeSubscriptionPlan(arg1:number,arg2:number,arg3:number):Promise<models.Subscription>;
 
 export function ChargeCustomer(arg1:number):Promise<void>;
@@ -82,7 +84,11 @@ export function DiscardComanda(arg1:number):Promise<models.ComandaDetails>;
 
 export function DuplicateQuote(arg1:number):Promise<models.QuoteDetails>;
 
+export function EndSubscriptionExemption(arg1:number):Promise<models.Subscription>;
+
 export function EnrollFace(arg1:number):Promise<models.GateMember>;
+
+export function EnrollFacePhoto(arg1:number,arg2:string):Promise<models.GateMember>;
 
 export function ExportSavedReport(arg1:number):Promise<boolean>;
 
@@ -271,6 +277,10 @@ export function PrintPixQR(arg1:number,arg2:string):Promise<void>;
 export function PrintReceipt(arg1:string,arg2:number):Promise<void>;
 
 export function ProductsForSale(arg1:Array<number>):Promise<Array<models.Product>>;
+
+export function PurgeCustomer(arg1:number,arg2:number):Promise<boolean>;
+
+export function PurgeCustomerPreview(arg1:number):Promise<models.CustomerPurge>;
 
 export function QuitApp():Promise<void>;
 

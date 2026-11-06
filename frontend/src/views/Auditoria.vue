@@ -41,7 +41,7 @@ const actionLabels: Record<string, string> = {
   importacao_clientes: 'Importação de clientes (planilha)', orcamento_reaberto: 'Orçamento reaberto',
   primeiro_acesso: 'Primeiro acesso', login: 'Entrou', login_falhou: 'Login recusado', logout: 'Saiu',
   autorizacao: 'Autorização de gerente', usuario_criado: 'Usuário cadastrado', usuario_alterado: 'Usuário alterado',
-  senha_alterada: 'Senha alterada', venda_cancelada: 'Venda cancelada', devolucao: 'Devolução de venda', desconto_acima_limite: 'Desconto acima do limite',
+  senha_alterada: 'Senha alterada', venda_cancelada: 'Venda cancelada', forma_pagamento_alterada: 'Forma de pagamento trocada', fatura_isenta: 'Mensalidade isenta', isencao_encerrada: 'Isenção encerrada', devolucao: 'Devolução de venda', desconto_acima_limite: 'Desconto acima do limite',
   caixa_aberto: 'Caixa aberto', caixa_fechado: 'Caixa fechado', sangria: 'Sangria', suprimento: 'Suprimento',
   ajuste_estoque: 'Ajuste de estoque', reconciliacao_estoque: 'Reconciliação de estoque', estorno_fiado: 'Estorno de recebimento a prazo', limite_fiado: 'Limite a prazo', produto_cadastrado: 'Produto cadastrado com autorização', grade_criada: 'Grade criada', grade_ampliada: 'Grade ampliada', preco_grade_alterado: 'Preço da grade alterado', custo_alterado: 'Custo alterado', produto_ativo_alterado: 'Produto ativado/desativado', fornecedor_cadastrado: 'Fornecedor cadastrado', fornecedor_alterado: 'Fornecedor alterado', compra_registrada: 'Entrada de mercadoria', compra_estornada: 'Entrada estornada', promocao_salva: 'Promoção salva', orcamento_convertido: 'Orçamento convertido em venda',
   preco_alterado: 'Preço alterado', configuracoes_alteradas: 'Configurações alteradas', restauracao_agendada: 'Restauração de backup',

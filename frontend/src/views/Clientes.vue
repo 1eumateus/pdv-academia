@@ -5,6 +5,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { DeleteCustomer, ListCustomers, SetCustomerActive } from '../../wailsjs/go/main/App'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CustomerFormModal from '../components/CustomerFormModal.vue'
+import PurgeCustomerDialog from '../components/PurgeCustomerDialog.vue'
 import { call, errorMessage } from '../api'
 import { exportTable } from '../composables/exportTable'
 import { can } from '../composables/session'
@@ -60,6 +61,14 @@ async function toggleActive(c: Customer) {
   }
 }
 const deleteAsk = ref<Customer | null>(null)
+// Com a permissão, Excluir apaga também todo o histórico (mostra antes o que some).
+const purgeAsk = ref<Customer | null>(null)
+const canPurge = computed(() => can('apagar_pessoa_historico'))
+function purged() {
+  const c = purgeAsk.value!
+  purgeAsk.value = null
+  customers.value = customers.value.filter((x) => x.id !== c.id)
+}
 async function remove() {
   const c = deleteAsk.value!
   deleteAsk.value = null
@@ -93,9 +102,11 @@ function openForm(c?: Customer) {
     </div>
     <template v-if="sub === 'aniversariantes'">
       <div class="row chips" role="group" aria-label="Período">
-        <button class="chip" :aria-pressed="period === 'hoje'" @click="period = 'hoje'">Hoje</button>
-        <button class="chip" :aria-pressed="period === 'semana'" @click="period = 'semana'">Próximos 7 dias</button>
-        <button class="chip" :aria-pressed="period === 'mes'" @click="period = 'mes'">Este mês</button>
+        <div class="chip-track">
+          <button class="chip" :aria-pressed="period === 'hoje'" @click="period = 'hoje'">Hoje</button>
+          <button class="chip" :aria-pressed="period === 'semana'" @click="period = 'semana'">Próximos 7 dias</button>
+          <button class="chip" :aria-pressed="period === 'mes'" @click="period = 'mes'">Este mês</button>
+        </div>
       </div>
       <div v-if="!birthdays.length" class="state">Nenhum aniversariante {{ period === 'hoje' ? 'hoje' : period === 'semana' ? 'nos próximos 7 dias' : 'este mês' }}. Cadastre a data de nascimento no cliente.</div>
       <div v-else class="table-wrap">
@@ -142,19 +153,21 @@ function openForm(c?: Customer) {
               <button class="link icon-btn" @click="openForm(c)" title="Editar" aria-label="Editar"><Icon name="edit" /><span>Editar</span></button>
               <button class="link icon-btn" :style="c.active ? '' : 'color: var(--success)'" :title="c.active ? 'Inativar: não compra a prazo e a catraca nega' : 'Ativar o cliente'"
                 :aria-label="c.active ? 'Inativar' : 'Ativar'" @click="toggleActive(c)"><Icon :name="c.active ? 'desativar' : 'ativar'" /><span>{{ c.active ? 'Inativar' : 'Ativar' }}</span></button>
-              <button class="link icon-btn" style="color: var(--danger)" title="Excluir de vez (só cliente sem histórico)" aria-label="Excluir" @click="deleteAsk = c"><Icon name="remover" /><span>Excluir</span></button>
+              <button class="link icon-btn" style="color: var(--danger)" :title="canPurge ? 'Excluir de vez, com todo o histórico' : 'Excluir de vez (só cliente sem histórico)'" aria-label="Excluir" @click="canPurge ? (purgeAsk = c) : (deleteAsk = c)"><Icon name="remover" /><span>Excluir</span></button>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
-    <p class="small muted">Clientes com histórico não podem ser excluídos: use Inativar. Compras a prazo, cobrança e vale-troca ficam em Financeiro › A prazo.</p>
+    <p class="small muted">{{ canPurge ? 'Excluir apaga o cliente com todo o histórico (vendas, fiado, mensalidades): confira antes.' : 'Clientes com histórico não podem ser excluídos: use Inativar.' }} Compras a prazo, cobrança e vale-troca ficam em Financeiro › A prazo.</p>
     </template>
   </section>
 
   <ConfirmDialog v-if="deleteAsk" title="Excluir cliente" danger
     :message="`Excluir ${deleteAsk.name} de vez? Só é possível para quem não tem vendas, fiado, assinaturas nem passagens na catraca; para os outros, use Inativar.`"
     confirm-label="Excluir" cancel-label="Voltar" @confirm="remove" @cancel="deleteAsk = null" />
+
+  <PurgeCustomerDialog v-if="purgeAsk" :customer-id="purgeAsk.id" :name="purgeAsk.name" @done="purged" @close="purgeAsk = null" />
 
   <CustomerFormModal v-if="editing !== undefined" :customer="editing" @close="editing = undefined" @saved="editing = undefined; load()" />
 </template>

@@ -7,7 +7,7 @@ import Icon from './Icon.vue'
 import { openWhatsapp } from '../composables/charge'
 import { licenseStatus, storeName } from '../composables/cashState'
 
-const SUPPORT_WHATSAPP = '(94) 98448-9585'
+const SUPPORT_WHATSAPP = '(94) 98448-9685'
 
 const minimized = ref(false)
 const st = computed(() => licenseStatus.value)

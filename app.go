@@ -23,6 +23,7 @@ import (
 
 	"pdv/internal/actor"
 	"pdv/internal/db"
+	"pdv/internal/device"
 	"pdv/internal/license"
 	"pdv/internal/models"
 	"pdv/internal/pdf"
@@ -140,6 +141,9 @@ func (a *App) startup(ctx context.Context) {
 	if a.gate != nil {
 		// Cada passagem vai para a tela na hora (EventsOn("acesso")).
 		a.gate.OnEvent = func(e models.GateEvent) { runtime.EventsEmit(ctx, "acesso", e) }
+		// Diagnóstico do giro: todo aviso do iDFace que não é rosto vai para o pdv.log.
+		device.OnNotice = func(path, body string) { a.log.Info("aviso do iDFace", "caminho", path, "dados", body) }
+		a.log.Info("diagnóstico do giro ativo: avisos do iDFace vão para este log")
 		if err := a.gate.Start(context.Background()); err != nil {
 			a.log.Error("iniciar catraca", "erro", err)
 		}
@@ -659,6 +663,13 @@ func (a *App) CancelSale(saleID int64, reason string) (models.SaleDetails, error
 	})
 }
 
+// ChangeSalePaymentMethod troca a forma de pagamento da venda (uma vez por venda).
+func (a *App) ChangeSalePaymentMethod(saleID int64, method, reason string) (models.SaleDetails, error) {
+	return callW(a, "trocar a forma de pagamento", func(ctx context.Context) (models.SaleDetails, error) {
+		return a.sales.ChangePaymentMethod(ctx, saleID, method, reason)
+	})
+}
+
 // ---------------- Estoque ----------------
 
 func (a *App) RegisterStockEntry(productID, qty int64, notes string) (models.Product, error) {
@@ -881,6 +892,13 @@ func (a *App) CreateSubscription(customerID, productID, priceCents int64, rules 
 	})
 }
 
+// EndSubscriptionExemption encerra a isenção; a mensalidade passa a vencer hoje.
+func (a *App) EndSubscriptionExemption(subID int64) (models.Subscription, error) {
+	return callW(a, "encerrar isenção", func(ctx context.Context) (models.Subscription, error) {
+		return a.subs.EndExemption(ctx, subID)
+	})
+}
+
 // PaySubscriptionInvoice recebe a fatura no caixa e devolve a venda gerada.
 func (a *App) PaySubscriptionInvoice(in models.PayInvoiceInput) (models.SaleDetails, error) {
 	return callW(a, "pagar fatura", func(ctx context.Context) (models.SaleDetails, error) { return a.subs.Pay(ctx, in) })
@@ -916,6 +934,16 @@ func (a *App) SetCustomerActive(id int64, active bool) (models.Customer, error) 
 // DeleteCustomer exclui um cliente sem histórico (com histórico, recusa: inative).
 func (a *App) DeleteCustomer(id int64) (bool, error) {
 	return callW(a, "excluir cliente", func(ctx context.Context) (bool, error) { return true, a.gate.DeleteCustomer(ctx, id) })
+}
+
+// PurgeCustomerPreview mostra o que some ao apagar a pessoa com todo o histórico.
+func (a *App) PurgeCustomerPreview(id int64) (models.CustomerPurge, error) {
+	return call(a, "prévia de apagar pessoa", func(ctx context.Context) (models.CustomerPurge, error) { return a.gate.PurgeCustomerPreview(ctx, id) })
+}
+
+// PurgeCustomer apaga a pessoa e todo o histórico dela (vendas, mensalidades, fiado, passagens, rosto).
+func (a *App) PurgeCustomer(id int64, expectSales int) (bool, error) {
+	return callW(a, "apagar pessoa com histórico", func(ctx context.Context) (bool, error) { return true, a.gate.PurgeCustomer(ctx, id, expectSales) })
 }
 
 // PaySubscriptionOutside dá baixa na mensalidade sem lançar no caixa (pagamento retroativo).

@@ -9,7 +9,7 @@ import { ApplyTestPurge, ListUsers, PreviewTestPurge } from '../../wailsjs/go/ma
 import { models } from '../../wailsjs/go/models'
 import { call, errorMessage } from '../api'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-import { formatDateTime, money, paymentLabels, today } from '../composables/format'
+import { formatDateTime, money, paymentLabels, saleMethodLabel, today } from '../composables/format'
 import { useToast } from '../composables/toast'
 
 const toast = useToast()
@@ -99,7 +99,7 @@ async function apply() {
                 <td class="mono">#{{ s.id }}</td>
                 <td class="nowrap">{{ formatDateTime(s.at) }}</td>
                 <td class="left">{{ s.customerName || '—' }}</td>
-                <td>{{ paymentLabels[s.paymentMethod] ?? s.paymentMethod }}</td>
+                <td>{{ saleMethodLabel(s) }}</td>
                 <td>{{ s.status === 'cancelada' ? 'Cancelada' : 'Concluída' }}</td>
                 <td class="right mono">{{ money(s.totalCents) }}</td>
               </tr>

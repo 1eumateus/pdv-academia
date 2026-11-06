@@ -150,7 +150,7 @@ async function toggleActive(p: Product, confirmed = false) {
       <AccessRulesFields v-if="form.plan" v-model="form.rules" />
       <label class="field">Descrição (opcional)<textarea v-model="form.description" maxlength="500" placeholder="Ex.: 3x por semana, musculação, horário livre" /></label>
       <label v-if="can('ativar_produto')" class="check"><input v-model="form.active" type="checkbox" /> Ativo (disponível para venda e assinatura)</label>
-      <p v-if="form.plan" class="small muted" style="margin: 0">Os alunos assinam em Academia › Assinaturas. Mudar o preço vale para as próximas faturas.</p>
+      <p v-if="form.plan" class="small muted" style="margin: 0">Os alunos assinam pela ficha, em Academia › Alunos e rostos. Mudar o preço vale para as próximas faturas.</p>
       <div v-if="form.error" class="alert error" role="alert">{{ form.error }}</div>
       <footer class="row end">
         <button type="button" :disabled="form.busy" @click="form.open = false">Cancelar</button>

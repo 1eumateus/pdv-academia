@@ -14,7 +14,7 @@ import (
 type CustomerRepo struct{}
 
 const customerCols = `id, name, phone, document, email, zip_code, street, number, complement, district, city,
-	state, reference, notes, credit_limit_cents, credit_balance_cents, store_credit_cents, active, created_at, updated_at, last_charge_at, birth_date`
+	state, reference, notes, credit_limit_cents, credit_balance_cents, store_credit_cents, active, created_at, updated_at, last_charge_at, birth_date, gender`
 
 // CustomerFields são os dados cadastrais já validados pelo serviço.
 type CustomerFields struct {
@@ -34,11 +34,11 @@ func scanCustomer(s interface{ Scan(...any) error }) (models.Customer, error) {
 		active           int
 		created, updated string
 		lastCharge       sql.NullString
-		birth            sql.NullString
+		birth, gender    sql.NullString
 		err              error
 	)
 	if err = s.Scan(&c.ID, &c.Name, &opt[0], &opt[1], &opt[2], &opt[3], &opt[4], &opt[5], &opt[6], &opt[7],
-		&opt[8], &opt[9], &opt[10], &opt[11], &c.CreditLimitCents, &c.CreditBalanceCents, &c.StoreCreditCents, &active, &created, &updated, &lastCharge, &birth); err != nil {
+		&opt[8], &opt[9], &opt[10], &opt[11], &c.CreditLimitCents, &c.CreditBalanceCents, &c.StoreCreditCents, &active, &created, &updated, &lastCharge, &birth, &gender); err != nil {
 		return c, err
 	}
 	c.Phone, c.Document, c.Email, c.ZipCode = nullStr(opt[0]), nullStr(opt[1]), nullStr(opt[2]), nullStr(opt[3])
@@ -46,6 +46,7 @@ func scanCustomer(s interface{ Scan(...any) error }) (models.Customer, error) {
 	c.City, c.State, c.Reference, c.Notes = nullStr(opt[8]), nullStr(opt[9]), nullStr(opt[10]), nullStr(opt[11])
 	c.Active = active == 1
 	c.BirthDate = nullStr(birth)
+	c.Gender = nullStr(gender)
 	if lastCharge.Valid {
 		t, err := parseTime(lastCharge.String)
 		if err != nil {
@@ -64,6 +65,12 @@ func scanCustomer(s interface{ Scan(...any) error }) (models.Customer, error) {
 func (CustomerRepo) SetBirthDate(ctx context.Context, q DBTX, id int64, date *string) error {
 	_, err := q.ExecContext(ctx, `UPDATE customers SET birth_date = ? WHERE id = ?`, date, id)
 	return wrap("gravar data de nascimento", err)
+}
+
+// SetGender grava o gênero (nil apaga).
+func (CustomerRepo) SetGender(ctx context.Context, q DBTX, id int64, gender *string) error {
+	_, err := q.ExecContext(ctx, `UPDATE customers SET gender = ? WHERE id = ?`, gender, id)
+	return wrap("gravar gênero", err)
 }
 
 // SetActive ativa ou desativa o cliente.

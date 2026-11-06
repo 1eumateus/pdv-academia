@@ -1,26 +1,28 @@
 <!-- Caminho: catraca/frontend/src/views/Catraca.vue -->
 <script setup lang="ts">
-// Monitor da catraca: situação do leitor facial, passagens ao vivo, liberação
-// do aluno no balcão (busca o cliente e confere a assinatura) e liberação
-// manual com motivo.
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { GateCheckAndRelease, GateManualRelease, GateStatus, ListGateEvents, ListGateMembers } from '../../wailsjs/go/main/App'
+// Monitor da catraca: situação do leitor facial, passagens ao vivo, consulta
+// do aluno (a busca só mostra se ele passa, não abre a catraca) e liberação
+// manual com um clique.
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { GateManualRelease, GateStatus, ListGateEvents, ListGateMembers } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { models } from '../../wailsjs/go/models'
 import { call, errorMessage } from '../api'
-import Modal from '../components/Modal.vue'
 import { formatDateTime } from '../composables/format'
+import { useToast } from '../composables/toast'
 
 const MAX_EVENTS = 100
 const status = ref<models.GateStatus | null>(null)
 const events = ref<models.GateEvent[]>([])
 const error = ref('')
 
-// Verificação no balcão: busca o aluno e libera se puder.
+const toast = useToast()
+
+// Consulta no balcão: busca o aluno e mostra se ele passa agora. Não libera.
 const term = ref('')
 const results = ref<models.GateMember[]>([])
-const check = reactive({ busy: false, member: null as models.GateMember | null, result: null as models.GateCheck | null, error: '' })
-const manual = reactive({ open: false, reason: '', busy: false, error: '' })
+const checked = ref<models.GateMember | null>(null)
+const manualBusy = ref(false)
 
 async function loadStatus() {
   try {
@@ -62,29 +64,23 @@ watch(term, () => {
   }, 200)
 })
 
-async function checkMember(m: models.GateMember) {
-  Object.assign(check, { busy: true, member: m, result: null, error: '' })
+function showMember(m: models.GateMember) {
+  checked.value = m
   term.value = ''
   results.value = []
-  try {
-    check.result = await call(GateCheckAndRelease(m.customerId))
-  } catch (e) {
-    check.error = errorMessage(e)
-  } finally {
-    check.busy = false
-  }
 }
 
+// Liberação manual: um clique abre a catraca (fica registrada como manual).
 async function releaseManual() {
-  manual.busy = true
-  manual.error = ''
+  if (manualBusy.value) return
+  manualBusy.value = true
   try {
-    await call(GateManualRelease(manual.reason))
-    manual.open = false
+    await call(GateManualRelease(''))
+    toast.success('Catraca liberada.')
   } catch (e) {
-    manual.error = errorMessage(e)
+    toast.error(errorMessage(e))
   } finally {
-    manual.busy = false
+    manualBusy.value = false
   }
 }
 
@@ -128,22 +124,21 @@ const sourceLabel: Record<string, string> = { leitor: 'Leitor facial', balcao: '
     <section class="card stack">
       <div class="row">
         <div style="position: relative; flex: 1; max-width: 520px">
-          <input v-model="term" type="search" placeholder="Buscar aluno por nome, telefone ou CPF para liberar" aria-label="Buscar aluno" style="width: 100%" />
+          <input v-model="term" type="search" placeholder="Consultar aluno por nome, telefone ou CPF" aria-label="Consultar aluno" style="width: 100%" />
           <div v-if="results.length" class="user-pop" style="left: 0; right: 0">
-            <button v-for="m in results" :key="m.customerId" @click="checkMember(m)">
+            <button v-for="m in results" :key="m.customerId" @click="showMember(m)">
               {{ m.name }} <span class="small muted">· {{ m.plans.map((p) => p.name).join(', ') || 'sem plano' }}</span>
             </button>
           </div>
         </div>
         <span class="spacer" />
-        <button class="primary" @click="Object.assign(manual, { open: true, reason: '', error: '' })">Liberação manual</button>
+        <button class="primary" :disabled="manualBusy" title="Abre a catraca agora (fica registrada como liberação manual)" @click="releaseManual">
+          {{ manualBusy ? 'Liberando…' : 'Liberação manual' }}
+        </button>
       </div>
-      <div v-if="check.busy" class="state">Verificando {{ check.member?.name }}…</div>
-      <div v-else-if="check.error" class="alert error">{{ check.member?.name }}: {{ check.error }}</div>
-      <div v-else-if="check.result" class="alert" :class="check.result.allowed ? 'success' : 'error'">
-        <strong>{{ check.member?.name }}</strong> — {{ check.result.allowed ? 'LIBERADO' : 'NEGADO' }}: {{ check.result.reason }}
-        <span v-if="check.result.allowed && !check.result.released"> (acionamento desligado: a catraca não foi aberta)</span>
-        <RouterLink v-if="!check.result.allowed" to="/assinaturas"> · Ir para Assinaturas</RouterLink>
+      <div v-if="checked" class="alert" :class="checked.allowed ? 'success' : 'error'">
+        <strong>{{ checked.name }}</strong> — {{ checked.allowed ? 'pode passar' : 'não pode passar' }}: {{ checked.reason }}
+        <RouterLink to="/catraca/alunos"> · Abrir em Alunos e rostos</RouterLink>
       </div>
     </section>
 
@@ -167,14 +162,4 @@ const sourceLabel: Record<string, string> = { leitor: 'Leitor facial', balcao: '
     </section>
   </div>
 
-  <Modal v-if="manual.open" title="Liberação manual" :busy="manual.busy" @close="manual.open = false">
-    <form class="stack" @submit.prevent="releaseManual">
-      <label class="field">Motivo (fica registrado)<input v-model="manual.reason" maxlength="200" placeholder="Ex.: visitante, aula experimental, teste" required /></label>
-      <div v-if="manual.error" class="alert error" role="alert">{{ manual.error }}</div>
-      <footer class="row end">
-        <button type="button" :disabled="manual.busy" @click="manual.open = false">Cancelar</button>
-        <button type="submit" class="success" :disabled="manual.busy">Liberar catraca</button>
-      </footer>
-    </form>
-  </Modal>
 </template>

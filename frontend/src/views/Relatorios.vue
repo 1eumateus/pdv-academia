@@ -10,7 +10,7 @@ import ReportSheet from '../components/ReportSheet.vue'
 import SaleDetailsModal from '../components/SaleDetailsModal.vue'
 import SellerFilter from '../components/SellerFilter.vue'
 import { exportTable, savePdf, usePrint } from '../composables/exportTable'
-import { formatDateTime, money, paymentLabels, today } from '../composables/format'
+import { formatDateTime, money, paymentLabels, saleMethodLabel, today } from '../composables/format'
 import { directPrint, printReceipt } from '../composables/receipt'
 import { currentUser } from '../composables/session'
 import { useToast } from '../composables/toast'
@@ -83,6 +83,8 @@ const totals = computed(() => {
   { total: 0, count: 0, discount: 0, cancelled: 0 })
 })
 const ticket = computed(() => (totals.value.count ? Math.round(totals.value.total / totals.value.count) : 0))
+// Retiradas (sangrias) saem do dinheiro: somem junto com o filtro de Dinheiro.
+const withdrawals = computed(() => (methods.value.includes('dinheiro') ? report.value?.withdrawals ?? [] : []))
 
 function toggleMethod(m: string) {
   methods.value = methods.value.includes(m) ? methods.value.filter((x) => x !== m) : [...methods.value, m]
@@ -92,8 +94,10 @@ function exportXlsx() {
   if (!report.value) return
   exportTable('Vendas', `Período: ${period.value}${operator.value ? ` - ${operator.value}` : ''}`,
     [['Nº', 'int'], ['Data / Hora', 'text'], ['Operador', 'text'], ['Cliente', 'text'], ['Itens', 'text'], ['Forma', 'text'], ['Total', 'money'], ['Situação', 'text']],
-    sales.value.map((s) => [s.id, formatDateTime(s.createdAt), s.userName ?? '', s.customerName ?? '', s.itemsLabel,
-      paymentLabels[s.paymentMethod] ?? s.paymentMethod, s.totalCents, s.status === 'cancelada' ? 'Cancelada' : 'Concluída']))
+    [...sales.value.map((s) => [s.id, formatDateTime(s.createdAt), s.userName ?? '', s.customerName ?? '', s.itemsLabel,
+      saleMethodLabel(s), s.totalCents, s.status === 'cancelada' ? 'Cancelada' : 'Concluída']),
+    ...withdrawals.value.map((w) => [null, formatDateTime(w.at), w.userName ?? '', '', w.description || 'Retirada',
+      paymentLabels.dinheiro, -w.amountCents, 'Retirada'])])
 }
 
 async function printThermal() {
@@ -124,7 +128,9 @@ async function printThermal() {
     </form>
     <div class="row chips" role="group" aria-label="Formas de pagamento">
       <span class="small muted">Forma:</span>
-      <button v-for="m in methodKeys" :key="m" type="button" class="chip" :aria-pressed="methods.includes(m)" @click="toggleMethod(m)">{{ paymentLabels[m] }}</button>
+      <div class="chip-track">
+        <button v-for="m in methodKeys" :key="m" type="button" class="chip" :aria-pressed="methods.includes(m)" @click="toggleMethod(m)">{{ paymentLabels[m] }}</button>
+      </div>
     </div>
     <div v-if="error" class="alert error">{{ error }}</div>
   </section>
@@ -142,9 +148,15 @@ async function printThermal() {
       <div class="side">
         <div>
           <h4>Por forma de pagamento</h4>
-          <div v-if="!byPayment.length" class="state">Nenhuma venda.</div>
+          <div v-if="!byPayment.length && !withdrawals.length" class="state">Nenhuma venda.</div>
           <table v-else>
-            <tbody><tr v-for="t in byPayment" :key="t.paymentMethod"><td>{{ paymentLabels[t.paymentMethod] ?? t.paymentMethod }}</td><td class="right muted">{{ t.count }}</td><td class="right mono">{{ money(t.totalCents) }}</td></tr></tbody>
+            <tbody>
+              <tr v-for="t in byPayment" :key="t.paymentMethod"><td>{{ paymentLabels[t.paymentMethod] ?? t.paymentMethod }}</td><td class="right muted">{{ t.count }}</td><td class="right mono">{{ money(t.totalCents) }}</td></tr>
+              <template v-if="withdrawals.length">
+                <tr><td>Retiradas (sangria)</td><td class="right muted">{{ withdrawals.length }}</td><td class="right mono out">-{{ money(report.withdrawalsCents) }}</td></tr>
+                <tr><td><strong>Dinheiro após retiradas</strong></td><td /><td class="right mono"><strong>{{ money(report.cashAfterWithdrawals) }}</strong></td></tr>
+              </template>
+            </tbody>
           </table>
         </div>
         <div v-if="!shownUser">
@@ -155,6 +167,22 @@ async function printThermal() {
           </table>
         </div>
       </div>
+
+      <template v-if="withdrawals.length">
+        <h4>Retiradas do período</h4>
+        <table class="list">
+          <colgroup><col style="width: 15%" /><col style="width: 14%" /><col /><col style="width: 14%" /></colgroup>
+          <thead><tr><th>Data / Hora</th><th>Operador</th><th>Motivo</th><th class="right">Valor</th></tr></thead>
+          <tbody>
+            <tr v-for="(w, i) in withdrawals" :key="i">
+              <td class="nowrap">{{ formatDateTime(w.at) }}</td>
+              <td class="left">{{ w.userName ?? '—' }}</td>
+              <td class="ellipsis" :title="w.description">{{ w.description || '—' }}</td>
+              <td class="right mono out">-{{ money(w.amountCents) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
 
       <h4>Vendas do período</h4>
       <div v-if="!sales.length" class="state">Nenhuma venda no período.</div>
@@ -167,7 +195,7 @@ async function printThermal() {
             <td class="nowrap">{{ formatDateTime(s.createdAt) }}</td>
             <td class="left">{{ s.userName ?? '—' }}</td>
             <td class="ellipsis" :title="s.itemsLabel">{{ s.itemsLabel || '—' }}<span v-if="s.customerName" class="muted"> · {{ s.customerName }}</span></td>
-            <td>{{ paymentLabels[s.paymentMethod] ?? s.paymentMethod }}</td>
+            <td>{{ saleMethodLabel(s) }}</td>
             <td class="right mono">{{ money(s.totalCents) }}<span v-if="s.status === 'cancelada'" class="badge bad" style="margin-left: 4px">Cancelada</span></td>
           </tr>
         </tbody>
@@ -188,8 +216,10 @@ table th, table td { text-align: left; padding: 3px 8px; }
 table th.right, table td.right { text-align: right; }
 .list { table-layout: fixed; }
 .ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.out { color: var(--danger); }
 .print-only { display: none; }
 @media print {
+  .out { color: #000; }
   .print-only { display: inline; }
   .ellipsis { white-space: normal; }
 }

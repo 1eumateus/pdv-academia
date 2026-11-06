@@ -11,7 +11,7 @@ import ReceiptModal from '../components/ReceiptModal.vue'
 import SaleDetailsModal from '../components/SaleDetailsModal.vue'
 import { autoReceipt, refreshCash, settings } from '../composables/cashState'
 import type { ReceiptKind } from '../composables/receipt'
-import { cashTypeLabels, formatDateTime, money, parseMoney, paymentLabels } from '../composables/format'
+import { cashTypeLabels, formatDateTime, money, parseMoney, paymentLabels, saleMethodLabel } from '../composables/format'
 import { useToast } from '../composables/toast'
 import type { CashSession, CashSummary, models } from '../types'
 
@@ -217,7 +217,7 @@ async function showSession(id: number) {
               <td><button class="link" @click="saleId = s.id">nº {{ s.id }}</button></td>
               <td class="nowrap">{{ formatDateTime(s.createdAt) }}</td>
               <td>{{ s.itemsLabel || '—' }}<span v-if="s.customerName" class="muted"> · {{ s.customerName }}</span></td>
-              <td>{{ paymentLabels[s.paymentMethod] }}</td>
+              <td>{{ saleMethodLabel(s) }}</td>
               <td class="right mono">{{ money(s.totalCents) }}</td>
               <td><span v-if="s.status === 'cancelada'" class="badge bad">Cancelada</span></td>
             </tr>

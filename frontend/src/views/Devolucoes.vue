@@ -7,7 +7,7 @@ import { call, errorMessage } from '../api'
 import { exportTable } from '../composables/exportTable'
 import { can } from '../composables/session'
 import { useToast } from '../composables/toast'
-import { formatDateTime, money, paymentLabels, today } from '../composables/format'
+import { formatDateTime, money, paymentLabels, saleMethodLabel, today } from '../composables/format'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import Icon from '../components/Icon.vue'
 import ReceiptModal from '../components/ReceiptModal.vue'
@@ -164,7 +164,7 @@ const totals = computed(() => {
               <td class="mono">{{ s.id }}</td>
               <td class="nowrap small">{{ formatDateTime(s.createdAt) }}</td>
               <td class="left">{{ s.customerName ?? '—' }}</td>
-              <td class="small nowrap">{{ paymentLabels[s.paymentMethod] ?? s.paymentMethod }}</td>
+              <td class="small nowrap">{{ saleMethodLabel(s) }}</td>
               <td class="right mono nowrap">{{ money(s.totalCents) }}</td>
               <td class="right actions-cell">
                 <button class="link icon-btn" title="Devolver alguns itens desta venda" aria-label="Devolver itens desta venda" @click.stop="returnSaleId = s.id"><Icon name="devolucao" /><span>Devolver itens</span></button>

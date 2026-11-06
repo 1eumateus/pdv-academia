@@ -26,6 +26,7 @@ import (
 // Permissões verificadas nos serviços.
 const (
 	PermCancelSale        = "cancelar_venda"
+	PermChangePayment     = "alterar_forma_pagamento"
 	PermReturns           = "trocas_devolucoes"
 	PermDiscount          = "desconto_acima_limite"
 	PermWithdrawal        = "sangria"
@@ -47,41 +48,67 @@ const (
 	PermAllSales          = "ver_vendas_de_todos"
 	PermUsers             = "gerenciar_usuarios"
 	PermAudit             = "ver_auditoria"
+	PermExempt            = "isentar_assinatura"
+	PermPayOutside        = "pagamento_fora_caixa"
+	PermPurge             = "apagar_testes"
 )
 
-// configurablePerms é a lista (na ordem da tela) que o administrador libera
-// por papel. Usuários e auditoria ficam fora: são sempre só do administrador,
-// para ninguém conseguir tirar o próprio acesso de administrador.
+// configurablePerms é a lista (na ordem da tela, por grupo) que o administrador
+// libera por usuário. Risky marca o que é de risco: nunca vem no padrão de
+// nenhum papel, só quando o administrador marca. Ficam fora (só do
+// administrador, sem como liberar): gerenciar usuários, porque quem cadastra
+// usuários poderia se dar todas as permissões, e configurar a catraca, porque
+// um erro ali (IP, senha, acionamento) para a entrada da academia.
 var configurablePerms = []models.PermissionItem{
-	{Key: PermCancelSale, Label: "cancelar venda"},
-	{Key: PermReturns, Label: "fazer trocas e devoluções de vendas"},
-	{Key: PermDiscount, Label: "dar desconto acima do limite"},
-	{Key: PermWithdrawal, Label: "fazer sangria"},
-	{Key: PermBills, Label: "contas a pagar: cadastrar, pagar e ver comprovantes"},
-	{Key: PermPauseSubscription, Label: "pausar e retomar assinatura (os dias pausados não contam)"},
-	{Key: PermGate, Label: "catraca: configurar, bloquear aluno, dar cortesia e mexer no cadastro do leitor facial"},
-	{Key: PermCloseOtherCash, Label: "fechar o caixa de outro usuário (modo caixa por usuário)"},
-	{Key: PermStockEntry, Label: "dar entrada no estoque"},
-	{Key: PermStockReturn, Label: "registrar devolução ao estoque"},
-	{Key: PermStockAdjust, Label: "ajustar estoque"},
-	{Key: PermProductCreate, Label: "cadastrar produto"},
-	{Key: PermProductActive, Label: "ativar e desativar produto"},
-	{Key: PermCost, Label: "ver e alterar custo e margem"},
-	{Key: PermPurchases, Label: "cadastrar fornecedores, registrar compras e importar XML"},
-	{Key: PermAllSales, Label: "ver vendas e relatórios de todos os usuários (sem ela, só as próprias)"},
-	{Key: PermPrice, Label: "alterar preço de produto"},
-	{Key: PermReverseCredit, Label: "estornar recebimento a prazo"},
-	{Key: PermCreditLimit, Label: "definir o limite de compra a prazo do cliente"},
-	{Key: PermSettings, Label: "alterar configurações"},
-	{Key: PermRestore, Label: "restaurar backup"},
+	{Group: "Vendas e caixa", Key: PermCancelSale, Label: "cancelar venda"},
+	{Group: "Vendas e caixa", Key: PermReturns, Label: "fazer trocas e devoluções de vendas"},
+	{Group: "Vendas e caixa", Key: PermDiscount, Label: "dar desconto acima do limite"},
+	{Group: "Vendas e caixa", Key: PermChangePayment, Label: "trocar a forma de pagamento de uma venda já feita", Risky: true},
+	{Group: "Vendas e caixa", Key: PermWithdrawal, Label: "fazer sangria"},
+	{Group: "Vendas e caixa", Key: PermCloseOtherCash, Label: "fechar o caixa de outro usuário (modo caixa por usuário)"},
+	{Group: "Vendas e caixa", Key: PermAllSales, Label: "ver vendas e relatórios de todos os usuários (sem ela, só as próprias)"},
+
+	{Group: "Assinaturas", Key: PermPauseSubscription, Label: "pausar e retomar assinatura (os dias pausados não contam)"},
+	{Group: "Assinaturas", Key: PermExempt, Label: "isentar mensalidade e encerrar isenção", Risky: true},
+	{Group: "Assinaturas", Key: PermPayOutside, Label: "lançar mensalidade paga fora do caixa e desfazer o lançamento", Risky: true},
+
+	{Group: "Catraca", Key: PermGateMember, Label: "bloquear e desbloquear aluno, dar cortesia e anotar observação"},
+	{Group: "Catraca", Key: PermGateManual, Label: "liberar a catraca na mão (visitante, aula experimental), com motivo"},
+	{Group: "Catraca", Key: PermGateFace, Label: "remover o rosto do aluno do leitor facial"},
+	{Group: "Catraca", Key: PermGateRemove, Label: "apagar aluno (tira o rosto, cancela as assinaturas e desativa o cliente)", Risky: true},
+	{Group: "Catraca", Key: PermGateStaff, Label: "cadastrar e remover funcionários (passam sempre, sem plano)", Risky: true},
+
+	{Group: "Produtos e estoque", Key: PermProductCreate, Label: "cadastrar produto"},
+	{Group: "Produtos e estoque", Key: PermProductActive, Label: "ativar e desativar produto"},
+	{Group: "Produtos e estoque", Key: PermPrice, Label: "alterar preço de produto"},
+	{Group: "Produtos e estoque", Key: PermCost, Label: "ver e alterar custo e margem"},
+	{Group: "Produtos e estoque", Key: PermStockEntry, Label: "dar entrada no estoque"},
+	{Group: "Produtos e estoque", Key: PermStockReturn, Label: "registrar devolução ao estoque"},
+	{Group: "Produtos e estoque", Key: PermStockAdjust, Label: "ajustar estoque"},
+	{Group: "Produtos e estoque", Key: PermPurchases, Label: "cadastrar fornecedores, registrar compras e importar XML"},
+
+	{Group: "Clientes e financeiro", Key: PermCreditLimit, Label: "definir o limite de compra a prazo do cliente"},
+	{Group: "Clientes e financeiro", Key: PermReverseCredit, Label: "estornar recebimento a prazo", Risky: true},
+	{Group: "Clientes e financeiro", Key: PermPurgeCustomer, Label: "apagar cliente ou aluno com todo o histórico (vendas, mensalidades, fiado, passagens)", Risky: true},
+	{Group: "Clientes e financeiro", Key: PermBills, Label: "contas a pagar: cadastrar, pagar e ver comprovantes"},
+
+	{Group: "Sistema", Key: PermSettings, Label: "alterar configurações"},
+	{Group: "Sistema", Key: PermAudit, Label: "consultar a auditoria"},
+	{Group: "Sistema", Key: PermRestore, Label: "restaurar backup", Risky: true},
+	{Group: "Sistema", Key: PermPurge, Label: "apagar vendas de teste", Risky: true},
 }
+
+// permsVersion vai junto da lista gravada a partir desta versão. Lista sem ela
+// é de antes: a antiga "catraca" vale pelas novas que ela cobria, e a liberação
+// manual (que era livre para todos) continua liberada.
+const permsVersion = "_v2"
 
 func permLabel(perm string) string {
 	switch perm {
 	case PermUsers:
 		return "gerenciar usuários e permissões"
-	case PermAudit:
-		return "consultar a auditoria"
+	case PermGateConfig:
+		return "configurar a catraca e importar pessoas do leitor facial"
 	}
 	for _, p := range configurablePerms {
 		if p.Key == perm {
@@ -101,21 +128,21 @@ func isConfigurable(perm string) bool {
 }
 
 // DefaultPerms são as permissões que um usuário novo recebe pelo papel: o
-// gerente pode tudo e o operador só cadastra produto e dá entrada/devolução.
+// gerente pode quase tudo e o operador cadastra produto, dá entrada/devolução
+// e libera a catraca na mão. As de risco nunca vêm no padrão.
 func DefaultPerms(role string) []string {
 	switch role {
 	case models.RoleManager:
-		// O gerente pode tudo, menos ver as vendas dos outros (só o administrador, salvo se marcado).
 		out := make([]string, 0, len(configurablePerms))
 		for _, p := range configurablePerms {
-			// Ver as vendas de todos e pausar assinatura: só se o administrador marcar.
-			if p.Key != PermAllSales && p.Key != PermPauseSubscription {
+			// Ver as vendas de todos, pausar assinatura e as de risco: só se o administrador marcar.
+			if !p.Risky && p.Key != PermAllSales && p.Key != PermPauseSubscription && p.Key != PermAudit {
 				out = append(out, p.Key)
 			}
 		}
 		return out
 	case models.RoleOperator:
-		return []string{PermProductCreate, PermStockEntry, PermStockReturn}
+		return []string{PermProductCreate, PermStockEntry, PermStockReturn, PermGateManual}
 	}
 	return []string{}
 }
@@ -124,7 +151,7 @@ func DefaultPerms(role string) []string {
 // cadastro ou, se nunca foram escolhidas (nil), as padrão do papel.
 func EffectivePerms(u models.User) []string {
 	if u.Role == models.RoleAdmin {
-		out := []string{PermUsers, PermAudit}
+		out := []string{PermUsers, PermGateConfig}
 		for _, p := range configurablePerms {
 			out = append(out, p.Key)
 		}
@@ -133,6 +160,8 @@ func EffectivePerms(u models.User) []string {
 	src := u.Permissions
 	if src == nil {
 		src = DefaultPerms(u.Role)
+	} else if !slices.Contains(src, permsVersion) {
+		src = legacyPerms(src)
 	}
 	out := []string{}
 	for _, k := range src {
@@ -141,6 +170,15 @@ func EffectivePerms(u models.User) []string {
 		}
 	}
 	return out
+}
+
+// legacyPerms traduz a lista gravada antes das permissões por grupo.
+func legacyPerms(src []string) []string {
+	out := append([]string{}, src...)
+	if slices.Contains(src, PermGate) {
+		out = append(out, PermGateMember, PermGateFace, PermGateRemove, PermGateStaff)
+	}
+	return append(out, PermGateManual)
 }
 
 // requirePerm confere se o usuário do context pode fazer a operação. Se não
@@ -298,6 +336,7 @@ func validateUser(in models.UserInput) (userFields, error) {
 				f.perms = append(f.perms, k)
 			}
 		}
+		f.perms = append(f.perms, permsVersion)
 	}
 	return f, nil
 }

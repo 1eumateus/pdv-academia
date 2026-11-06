@@ -60,6 +60,9 @@ func Migrations() []Migration {
 		{Name: "pausa de assinatura", Statements: migration35},
 		{Name: "contas a pagar", Statements: migration36},
 		{Name: "valor especial da assinatura e faturas importadas", Statements: migration37, Rebuild: true},
+		// Versão só marcada: um número 38 antigo já circulou sem esta tabela. O esquema
+		// da troca vem de ensurePaymentChanges, que olha a tabela e não o número.
+		{Name: "troca única da forma de pagamento da venda"},
 	}
 }
 
@@ -68,7 +71,87 @@ func LatestVersion() int { return len(Migrations()) }
 
 // Migrate aplica as migrations pendentes.
 func Migrate(ctx context.Context, conn *sql.DB) error {
-	return migrate(ctx, conn, Migrations())
+	if err := migrate(ctx, conn, Migrations()); err != nil {
+		return err
+	}
+	if err := ensurePaymentChanges(ctx, conn); err != nil {
+		return err
+	}
+	if err := ensureSubscriptionExempt(ctx, conn); err != nil {
+		return err
+	}
+	return ensureCustomerGender(ctx, conn)
+}
+
+// ensureCustomerGender cria o gênero do cliente, se faltar (nulo = não informado).
+// Olha a coluna e não o número da versão, como a isenção.
+func ensureCustomerGender(ctx context.Context, conn *sql.DB) error {
+	var n int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('customers') WHERE name = 'gender'`).Scan(&n); err != nil {
+		return fmt.Errorf("gênero do cliente: %w", err)
+	}
+	if n > 0 {
+		return nil
+	}
+	if _, err := conn.ExecContext(ctx, `ALTER TABLE customers ADD COLUMN gender TEXT`); err != nil {
+		return fmt.Errorf("gênero do cliente: %w", err)
+	}
+	return nil
+}
+
+// ensureSubscriptionExempt cria os campos da isenção da assinatura, se faltarem.
+// exempt_until: nulo = sem isenção; vazio = permanente; data = isenta até o dia.
+func ensureSubscriptionExempt(ctx context.Context, conn *sql.DB) error {
+	var n int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'exempt_until'`).Scan(&n); err != nil {
+		return fmt.Errorf("isenção da assinatura: %w", err)
+	}
+	if n > 0 {
+		return nil
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("isenção da assinatura: %w", err)
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		`ALTER TABLE subscriptions ADD COLUMN exempt_until TEXT`,
+		`ALTER TABLE subscriptions ADD COLUMN exempt_reason TEXT`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("isenção da assinatura: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("isenção da assinatura: %w", err)
+	}
+	return nil
+}
+
+// ensurePaymentChanges cria a tabela e as travas da troca de forma de pagamento
+// se faltarem, em qualquer versão do banco. Tudo numa transação.
+func ensurePaymentChanges(ctx context.Context, conn *sql.DB) error {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("troca da forma de pagamento: %w", err)
+	}
+	defer tx.Rollback()
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sale_payment_changes'`).Scan(&n); err != nil {
+		return fmt.Errorf("troca da forma de pagamento: %w", err)
+	}
+	if n > 0 {
+		return nil
+	}
+	for i, stmt := range paymentChangeSchema {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("troca da forma de pagamento, comando %d: %w", i+1, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("troca da forma de pagamento: %w", err)
+	}
+	return nil
 }
 
 func migrate(ctx context.Context, conn *sql.DB, list []Migration) error {
@@ -1015,6 +1098,55 @@ var migration37 = []string{
 	`CREATE INDEX ix_subscription_invoices_sub ON subscription_invoices (subscription_id)`,
 	`CREATE TRIGGER tr_subscription_invoices_no_delete BEFORE DELETE ON subscription_invoices
 	 BEGIN SELECT RAISE(ABORT, 'faturas não podem ser apagadas'); END`,
+}
+
+// Troca da forma de pagamento: no máximo uma por venda (sale_id único). As travas
+// da venda, do pagamento e do caixa só deixam passar exatamente a troca registrada
+// aqui; depois dela a forma atual já não é a "de origem" e nada mais muda. O
+// lançamento só muda com o caixa aberto; a regra de "caixa de hoje" fica no serviço,
+// que conhece o fuso da loja.
+var paymentChangeSchema = []string{
+	`CREATE TABLE sale_payment_changes (
+		id               INTEGER PRIMARY KEY,
+		sale_id          INTEGER NOT NULL UNIQUE REFERENCES sales (id),
+		from_method      TEXT    NOT NULL,
+		to_method        TEXT    NOT NULL CHECK (to_method IN ('dinheiro', 'pix', 'debito', 'credito')),
+		reason           TEXT    NOT NULL CHECK (length(trim(reason)) > 0),
+		user_id          INTEGER REFERENCES users (id),
+		authorized_by_id INTEGER REFERENCES users (id),
+		created_at       TEXT    NOT NULL,
+		CHECK (from_method <> to_method)
+	)`,
+	`CREATE TRIGGER tr_sale_payment_changes_no_update BEFORE UPDATE ON sale_payment_changes
+	 BEGIN SELECT RAISE(ABORT, 'a troca da forma de pagamento não pode ser alterada'); END`,
+	`CREATE TRIGGER tr_sale_payment_changes_no_delete BEFORE DELETE ON sale_payment_changes
+	 BEGIN SELECT RAISE(ABORT, 'a troca da forma de pagamento não pode ser apagada'); END`,
+	`DROP TRIGGER tr_sales_values_immutable`,
+	`CREATE TRIGGER tr_sales_values_immutable
+	 BEFORE UPDATE OF customer_id, comanda_id, subtotal_cents, discount_cents, total_cents, payment_method, created_at ON sales
+	 WHEN NEW.customer_id IS NOT OLD.customer_id OR NEW.comanda_id IS NOT OLD.comanda_id
+	   OR NEW.subtotal_cents IS NOT OLD.subtotal_cents OR NEW.discount_cents IS NOT OLD.discount_cents
+	   OR NEW.total_cents IS NOT OLD.total_cents OR NEW.created_at IS NOT OLD.created_at
+	   OR NOT EXISTS (SELECT 1 FROM sale_payment_changes c
+	     WHERE c.sale_id = OLD.id AND c.from_method = OLD.payment_method AND c.to_method = NEW.payment_method)
+	 BEGIN SELECT RAISE(ABORT, 'os valores de uma venda não podem ser alterados'); END`,
+	`DROP TRIGGER tr_sale_payments_no_update`,
+	`CREATE TRIGGER tr_sale_payments_no_update BEFORE UPDATE ON sale_payments
+	 WHEN NEW.id IS NOT OLD.id OR NEW.sale_id IS NOT OLD.sale_id OR NEW.amount_cents IS NOT OLD.amount_cents
+	   OR NOT EXISTS (SELECT 1 FROM sale_payment_changes c
+	     WHERE c.sale_id = OLD.sale_id AND c.from_method = OLD.method AND c.to_method = NEW.method)
+	 BEGIN SELECT RAISE(ABORT, 'pagamentos de venda não podem ser alterados'); END`,
+	`DROP TRIGGER tr_cash_movements_no_update`,
+	`CREATE TRIGGER tr_cash_movements_no_update BEFORE UPDATE ON cash_movements
+	 WHEN NEW.id IS NOT OLD.id OR NEW.session_id IS NOT OLD.session_id OR NEW.type IS NOT OLD.type
+	   OR NEW.amount_cents IS NOT OLD.amount_cents OR NEW.description IS NOT OLD.description
+	   OR NEW.reference_type IS NOT OLD.reference_type OR NEW.reference_id IS NOT OLD.reference_id
+	   OR NEW.created_at IS NOT OLD.created_at OR NEW.user_id IS NOT OLD.user_id
+	   OR OLD.type <> 'venda' OR OLD.reference_type IS NOT 'sale'
+	   OR (SELECT status FROM cash_sessions WHERE id = OLD.session_id) IS NOT 'aberta'
+	   OR NOT EXISTS (SELECT 1 FROM sale_payment_changes c
+	     WHERE c.sale_id = OLD.reference_id AND c.from_method = OLD.payment_method AND c.to_method = NEW.payment_method)
+	 BEGIN SELECT RAISE(ABORT, 'movimentações de caixa não podem ser alteradas'); END`,
 }
 
 var migration35 = []string{

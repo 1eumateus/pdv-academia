@@ -1073,6 +1073,7 @@ export namespace models {
 	    // Go type: time
 	    lastChargeAt?: any;
 	    birthDate?: string;
+	    gender?: string;
 	    // Go type: time
 	    createdAt: any;
 	    // Go type: time
@@ -1104,6 +1105,7 @@ export namespace models {
 	        this.active = source["active"];
 	        this.lastChargeAt = this.convertValues(source["lastChargeAt"], null);
 	        this.birthDate = source["birthDate"];
+	        this.gender = source["gender"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	        this.updatedAt = this.convertValues(source["updatedAt"], null);
 	    }
@@ -1225,6 +1227,7 @@ export namespace models {
 	    creditLimitCents: number;
 	    active: boolean;
 	    birthDate?: string;
+	    gender?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new CustomerInput(source);
@@ -1249,6 +1252,43 @@ export namespace models {
 	        this.creditLimitCents = source["creditLimitCents"];
 	        this.active = source["active"];
 	        this.birthDate = source["birthDate"];
+	        this.gender = source["gender"];
+	    }
+	}
+	export class CustomerPurge {
+	    customerId: number;
+	    name: string;
+	    sales: number;
+	    salesTotalCents: number;
+	    subscriptions: number;
+	    invoices: number;
+	    creditPayments: number;
+	    returns: number;
+	    passages: number;
+	    cashSessions: number;
+	    debtCents: number;
+	    storeCreditCents: number;
+	    hasFace: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CustomerPurge(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.customerId = source["customerId"];
+	        this.name = source["name"];
+	        this.sales = source["sales"];
+	        this.salesTotalCents = source["salesTotalCents"];
+	        this.subscriptions = source["subscriptions"];
+	        this.invoices = source["invoices"];
+	        this.creditPayments = source["creditPayments"];
+	        this.returns = source["returns"];
+	        this.passages = source["passages"];
+	        this.cashSessions = source["cashSessions"];
+	        this.debtCents = source["debtCents"];
+	        this.storeCreditCents = source["storeCreditCents"];
+	        this.hasFace = source["hasFace"];
 	    }
 	}
 	export class StockAlert {
@@ -2210,6 +2250,10 @@ export namespace models {
 	    payments: PaymentInput[];
 	    requestId: string;
 	    nextDue: string;
+	    discountCents: number;
+	    exempt: boolean;
+	    exemptUntil: string;
+	    reason: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new PayInvoiceInput(source);
@@ -2222,6 +2266,10 @@ export namespace models {
 	        this.payments = this.convertValues(source["payments"], PaymentInput);
 	        this.requestId = source["requestId"];
 	        this.nextDue = source["nextDue"];
+	        this.discountCents = source["discountCents"];
+	        this.exempt = source["exempt"];
+	        this.exemptUntil = source["exemptUntil"];
+	        this.reason = source["reason"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2246,8 +2294,10 @@ export namespace models {
 	
 	
 	export class PermissionItem {
+	    group: string;
 	    key: string;
 	    label: string;
+	    risky: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new PermissionItem(source);
@@ -2255,8 +2305,10 @@ export namespace models {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.group = source["group"];
 	        this.key = source["key"];
 	        this.label = source["label"];
+	        this.risky = source["risky"];
 	    }
 	}
 	export class PermissionCatalog {
@@ -3077,6 +3129,43 @@ export namespace models {
 		}
 	}
 	
+	export class ReportWithdrawal {
+	    // Go type: time
+	    at: any;
+	    userName?: string;
+	    description: string;
+	    amountCents: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ReportWithdrawal(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.at = this.convertValues(source["at"], null);
+	        this.userName = source["userName"];
+	        this.description = source["description"];
+	        this.amountCents = source["amountCents"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ReturnItem {
 	    saleItemId: number;
 	    productName: string;
@@ -3262,6 +3351,47 @@ export namespace models {
 	
 	
 	
+	export class SalePaymentChange {
+	    fromMethod: string;
+	    toMethod: string;
+	    reason: string;
+	    userName?: string;
+	    authorizedByName?: string;
+	    // Go type: time
+	    createdAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new SalePaymentChange(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.fromMethod = source["fromMethod"];
+	        this.toMethod = source["toMethod"];
+	        this.reason = source["reason"];
+	        this.userName = source["userName"];
+	        this.authorizedByName = source["authorizedByName"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class SalePayment {
 	    id: number;
 	    method: string;
@@ -3325,6 +3455,9 @@ export namespace models {
 	    customer?: Customer;
 	    delivery?: Delivery;
 	    returns: Return[];
+	    paymentChange?: SalePaymentChange;
+	    paymentChangeMethods: string[];
+	    paymentChangeBlocked: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SaleDetails(source);
@@ -3338,6 +3471,9 @@ export namespace models {
 	        this.customer = this.convertValues(source["customer"], Customer);
 	        this.delivery = this.convertValues(source["delivery"], Delivery);
 	        this.returns = this.convertValues(source["returns"], Return);
+	        this.paymentChange = this.convertValues(source["paymentChange"], SalePaymentChange);
+	        this.paymentChangeMethods = source["paymentChangeMethods"];
+	        this.paymentChangeBlocked = source["paymentChangeBlocked"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -3358,6 +3494,7 @@ export namespace models {
 		    return a;
 		}
 	}
+	
 	
 	
 	
@@ -3433,6 +3570,9 @@ export namespace models {
 	    stockMovements: StockMovement[];
 	    byOperator: OperatorTotal[];
 	    byCategory: CategoryTotal[];
+	    withdrawals: ReportWithdrawal[];
+	    withdrawalsCents: number;
+	    cashAfterWithdrawals: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new SalesReport(source);
@@ -3458,6 +3598,9 @@ export namespace models {
 	        this.stockMovements = this.convertValues(source["stockMovements"], StockMovement);
 	        this.byOperator = this.convertValues(source["byOperator"], OperatorTotal);
 	        this.byCategory = this.convertValues(source["byCategory"], CategoryTotal);
+	        this.withdrawals = this.convertValues(source["withdrawals"], ReportWithdrawal);
+	        this.withdrawalsCents = source["withdrawalsCents"];
+	        this.cashAfterWithdrawals = source["cashAfterWithdrawals"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -3826,6 +3969,9 @@ export namespace models {
 	    overdue: boolean;
 	    // Go type: time
 	    lastPaidAt?: any;
+	    exempt: boolean;
+	    exemptUntil: string;
+	    exemptReason: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Subscription(source);
@@ -3850,6 +3996,9 @@ export namespace models {
 	        this.openInvoice = this.convertValues(source["openInvoice"], SubscriptionInvoice);
 	        this.overdue = source["overdue"];
 	        this.lastPaidAt = this.convertValues(source["lastPaidAt"], null);
+	        this.exempt = source["exempt"];
+	        this.exemptUntil = source["exemptUntil"];
+	        this.exemptReason = source["exemptReason"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

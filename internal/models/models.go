@@ -326,7 +326,17 @@ type Subscription struct {
 	OpenInvoice *SubscriptionInvoice `json:"openInvoice"`
 	Overdue     bool                 `json:"overdue"`
 	LastPaidAt  *time.Time           `json:"lastPaidAt"`
+	// Exempt: isenta hoje. ExemptUntil: até quando (vazio = permanente).
+	Exempt       bool   `json:"exempt"`
+	ExemptUntil  string `json:"exemptUntil"`
+	ExemptReason string `json:"exemptReason"`
+	// RawExemptUntil: o valor gravado (nil = nunca isenta), para calcular Exempt.
+	RawExemptUntil *string `json:"-"`
 }
+
+// PermanentExemptDue é o vencimento da mensalidade de quem tem isenção permanente:
+// uma data tão distante que a catraca e as cobranças nunca a alcançam.
+const PermanentExemptDue = "2099-12-31"
 
 type SubscriptionInvoice struct {
 	ID          int64      `json:"id"`
@@ -458,6 +468,14 @@ type PayInvoiceInput struct {
 	RequestID     string         `json:"requestId"`
 	// NextDue: próximo vencimento escolhido (AAAA-MM-DD; vazio = pagamento + duração do plano).
 	NextDue string `json:"nextDue"`
+	// DiscountCents: desconto nesta mensalidade (menor que o valor; para zerar, use Exempt).
+	DiscountCents int64 `json:"discountCents"`
+	// Exempt: isenta a mensalidade (só o administrador, com motivo): vira uma venda de R$ 0,00.
+	Exempt bool `json:"exempt"`
+	// ExemptUntil: último dia da isenção (AAAA-MM-DD; vazio = permanente).
+	ExemptUntil string `json:"exemptUntil"`
+	// Reason: motivo da isenção (obrigatório) ou do desconto (opcional).
+	Reason string `json:"reason"`
 }
 
 // ProductCode é um par SKU (só números) + EAN-13 interno da mesma sequência.
@@ -489,7 +507,9 @@ type Customer struct {
 	// LastChargeAt: última cobrança do a prazo pelo WhatsApp.
 	LastChargeAt *time.Time `json:"lastChargeAt"`
 	// BirthDate: AAAA-MM-DD (opcional).
-	BirthDate *string   `json:"birthDate"`
+	BirthDate *string `json:"birthDate"`
+	// Gender: feminino, masculino ou outro (nil = não informado).
+	Gender    *string   `json:"gender"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -578,6 +598,8 @@ type CustomerInput struct {
 	Active           bool    `json:"active"`
 	// BirthDate: AAAA-MM-DD; nil mantém a atual, "" apaga.
 	BirthDate *string `json:"birthDate"`
+	// Gender: feminino, masculino ou outro; nil mantém o atual, "" apaga.
+	Gender *string `json:"gender"`
 }
 
 type Sale struct {
@@ -737,6 +759,22 @@ type SaleDetails struct {
 	Delivery *Delivery `json:"delivery"`
 	// Returns: devoluções feitas desta venda (itens e quantidades).
 	Returns []Return `json:"returns"`
+	// PaymentChange: a troca da forma de pagamento já feita (só pode haver uma).
+	PaymentChange *SalePaymentChange `json:"paymentChange"`
+	// PaymentChangeMethods: formas para as quais ainda dá para trocar (vazio = não dá).
+	PaymentChangeMethods []string `json:"paymentChangeMethods"`
+	// PaymentChangeBlocked: por que não dá para trocar (vazio se dá).
+	PaymentChangeBlocked string `json:"paymentChangeBlocked"`
+}
+
+// SalePaymentChange é a única troca de forma de pagamento permitida em uma venda.
+type SalePaymentChange struct {
+	FromMethod       string    `json:"fromMethod"`
+	ToMethod         string    `json:"toMethod"`
+	Reason           string    `json:"reason"`
+	UserName         *string   `json:"userName"`
+	AuthorizedByName *string   `json:"authorizedByName"`
+	CreatedAt        time.Time `json:"createdAt"`
 }
 
 // SaleItemInput é o que o frontend envia: só produto e quantidade. Preço e
@@ -984,6 +1022,19 @@ type SalesReport struct {
 	StockMovements      []StockMovement `json:"stockMovements"`
 	ByOperator          []OperatorTotal `json:"byOperator"`
 	ByCategory          []CategoryTotal `json:"byCategory"`
+	// Retiradas (sangrias) do período e o dinheiro vendido já descontado delas.
+	// O total vendido não muda: retirada é saída do caixa, não redução de venda.
+	Withdrawals          []ReportWithdrawal `json:"withdrawals"`
+	WithdrawalsCents     int64              `json:"withdrawalsCents"`
+	CashAfterWithdrawals int64              `json:"cashAfterWithdrawals"`
+}
+
+// ReportWithdrawal é uma retirada (sangria) no relatório; o valor vem positivo.
+type ReportWithdrawal struct {
+	At          time.Time `json:"at"`
+	UserName    *string   `json:"userName"`
+	Description string    `json:"description"`
+	AmountCents int64     `json:"amountCents"`
 }
 
 // Tipos de relatório gerado: o geral ou só uma seção dele.
@@ -1135,10 +1186,31 @@ type UserInput struct {
 	Permissions []string `json:"permissions"`
 }
 
+// CustomerPurge: o que some ao apagar a pessoa com todo o histórico (prévia).
+type CustomerPurge struct {
+	CustomerID       int64  `json:"customerId"`
+	Name             string `json:"name"`
+	Sales            int    `json:"sales"`
+	SalesTotalCents  int64  `json:"salesTotalCents"`
+	Subscriptions    int    `json:"subscriptions"`
+	Invoices         int    `json:"invoices"`
+	CreditPayments   int    `json:"creditPayments"`
+	Returns          int    `json:"returns"`
+	Passages         int    `json:"passages"`
+	CashSessions     int    `json:"cashSessions"` // caixas que perdem lançamentos
+	DebtCents        int64  `json:"debtCents"`    // fiado em aberto (será perdido)
+	StoreCreditCents int64  `json:"storeCreditCents"`
+	HasFace          bool   `json:"hasFace"`
+}
+
 // PermissionItem é uma permissão que o administrador pode marcar por usuário.
 type PermissionItem struct {
+	// Group: a permissão principal (o grupo na tela); Key/Label: a secundária.
+	Group string `json:"group"`
 	Key   string `json:"key"`
 	Label string `json:"label"`
+	// Risky: de risco; não vem no padrão de nenhum papel.
+	Risky bool `json:"risky"`
 }
 
 // PermissionCatalog alimenta a tela: a lista e os padrões de cada papel.

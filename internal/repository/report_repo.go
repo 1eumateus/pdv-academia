@@ -49,6 +49,37 @@ func (ReportRepo) TotalsByMethod(ctx context.Context, q DBTX, start, end time.Ti
 	return out, wrap(op, rows.Err())
 }
 
+// Withdrawals lista as retiradas (sangrias) do período, com o valor positivo.
+func (ReportRepo) Withdrawals(ctx context.Context, q DBTX, start, end time.Time, userID int64) ([]models.ReportWithdrawal, error) {
+	const op = "listar retiradas do caixa"
+	rows, err := q.QueryContext(ctx,
+		`SELECT m.created_at, u.name, COALESCE(m.description, ''), -m.amount_cents
+		 FROM cash_movements m LEFT JOIN users u ON u.id = m.user_id
+		 WHERE m.type = 'sangria' AND m.created_at >= ? AND m.created_at < ? AND (? = 0 OR m.user_id = ?)
+		 ORDER BY m.created_at, m.id`, FormatTime(start), FormatTime(end), userID, userID)
+	if err != nil {
+		return nil, wrap(op, err)
+	}
+	defer rows.Close()
+	out := []models.ReportWithdrawal{}
+	for rows.Next() {
+		var (
+			w       models.ReportWithdrawal
+			user    sql.NullString
+			created string
+		)
+		if err := rows.Scan(&created, &user, &w.Description, &w.AmountCents); err != nil {
+			return nil, wrap(op, err)
+		}
+		if w.At, err = parseTime(created); err != nil {
+			return nil, wrap(op, err)
+		}
+		w.UserName = nullStr(user)
+		out = append(out, w)
+	}
+	return out, wrap(op, rows.Err())
+}
+
 // TotalsByCategory soma os itens de vendas concluídas por categoria do produto.
 // Itens são somados pelo subtotal do item (antes do desconto da venda).
 func (ReportRepo) TotalsByCategory(ctx context.Context, q DBTX, start, end time.Time, userID int64) ([]models.CategoryTotal, error) {

@@ -129,6 +129,16 @@ func (s *ReportService) SavedXLSX(ctx context.Context, id int64) ([]byte, error)
 	}
 	if show(models.ReportByPayment) {
 		section("Forma de pagamento", "Vendas", lines)
+		lines = nil
+		for _, w := range r.Withdrawals {
+			lines = append(lines, []xlsxCell{t(brDateTime(w.At) + " " + withdrawalLabel(w)), {}, money(-w.AmountCents)})
+		}
+		if len(lines) > 0 {
+			after := money(r.CashAfterWithdrawals)
+			after.style = xsMoneyBold
+			lines = append(lines, []xlsxCell{bold("Dinheiro após retiradas"), {}, after})
+		}
+		section("Retiradas (sangria)", "", lines)
 	}
 	lines = nil
 	for _, x := range r.ByCategory {
@@ -164,6 +174,18 @@ func (s *ReportService) SavedXLSX(ctx context.Context, id int64) ([]byte, error)
 
 func NewReportService(b Base) *ReportService { return &ReportService{Base: b} }
 
+// withdrawalLabel: o motivo da retirada e quem fez, para a impressão e a planilha.
+func withdrawalLabel(w models.ReportWithdrawal) string {
+	label := strings.TrimSpace(w.Description)
+	if label == "" {
+		label = "Retirada"
+	}
+	if w.UserName != nil {
+		label += " (" + *w.UserName + ")"
+	}
+	return label
+}
+
 // Daily é o resumo de um dia local.
 func (s *ReportService) Daily(ctx context.Context, date string) (models.SalesReport, error) {
 	return s.Sales(ctx, date, date, 0)
@@ -192,6 +214,18 @@ func (s *ReportService) Sales(ctx context.Context, startDate, endDate string, us
 	if r.ByPaymentMethod, err = s.reports.TotalsByMethod(ctx, s.DB, start, end, uid); err != nil {
 		return r, err
 	}
+	if r.Withdrawals, err = s.reports.Withdrawals(ctx, s.DB, start, end, uid); err != nil {
+		return r, err
+	}
+	for _, t := range r.ByPaymentMethod {
+		if t.PaymentMethod == models.PaymentCash {
+			r.CashAfterWithdrawals = t.TotalCents
+		}
+	}
+	for _, w := range r.Withdrawals {
+		r.WithdrawalsCents += w.AmountCents
+	}
+	r.CashAfterWithdrawals -= r.WithdrawalsCents
 	if r.Products, err = s.reports.ProductsSold(ctx, s.DB, start, end, uid); err != nil {
 		return r, err
 	}

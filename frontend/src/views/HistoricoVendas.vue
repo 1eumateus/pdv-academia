@@ -6,7 +6,7 @@ import { call, errorMessage } from '../api'
 import { exportTable } from '../composables/exportTable'
 import SaleDetailsModal from '../components/SaleDetailsModal.vue'
 import SellerFilter from '../components/SellerFilter.vue'
-import { formatDateTime, money, paymentLabels, today } from '../composables/format'
+import { formatDateTime, money, paymentLabels, saleMethodLabel, today } from '../composables/format'
 import type { Sale } from '../types'
 
 const start = ref(today())
@@ -14,7 +14,7 @@ const end = ref(today())
 const sales = ref<Sale[]>([])
 function exportSales() {
   exportTable('Histórico de vendas', `${filtered.value.length} venda(s)`, [['Venda', 'int'], ['Data', 'text'], ['Itens', 'text'], ['Cliente', 'text'], ['Operador', 'text'], ['Forma', 'text'], ['Desconto', 'money'], ['Total', 'money'], ['Situação', 'text']],
-    filtered.value.map((s) => [s.id, formatDateTime(s.createdAt), s.itemsLabel, s.customerName ?? '', s.userName ?? '', paymentLabels[s.paymentMethod] ?? s.paymentMethod, s.discountCents, s.totalCents, s.status === 'cancelada' ? 'Cancelada' : 'Concluída']))
+    filtered.value.map((s) => [s.id, formatDateTime(s.createdAt), s.itemsLabel, s.customerName ?? '', s.userName ?? '', saleMethodLabel(s), s.discountCents, s.totalCents, s.status === 'cancelada' ? 'Cancelada' : 'Concluída']))
 }
 const loading = ref(false)
 const error = ref('')
@@ -81,7 +81,7 @@ onMounted(load)
               <td>{{ s.itemsLabel || '—' }}</td>
               <td class="left">{{ s.customerName ?? '—' }}</td>
               <td class="small">{{ s.userName ?? '—' }}</td>
-              <td>{{ paymentLabels[s.paymentMethod] }}</td>
+              <td>{{ saleMethodLabel(s) }}</td>
               <td class="right mono">{{ s.discountCents ? money(s.discountCents) : '—' }}</td>
               <td class="right mono">{{ money(s.totalCents) }}</td>
               <td><span class="badge" :class="s.status === 'cancelada' ? 'bad' : 'ok'">{{ s.status === 'cancelada' ? 'Cancelada' : 'Concluída' }}</span></td>

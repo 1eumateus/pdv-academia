@@ -595,7 +595,18 @@ func (s *SaleService) Details(ctx context.Context, saleID int64) (models.SaleDet
 	if err != nil {
 		return models.SaleDetails{}, err
 	}
-	out := models.SaleDetails{Sale: sale, Items: items, Payments: payments, Returns: returns, Delivery: delivery}
+	out := models.SaleDetails{Sale: sale, Items: items, Payments: payments, Returns: returns, Delivery: delivery, PaymentChangeMethods: []string{}}
+	if out.PaymentChange, err = s.sales.PaymentChange(ctx, s.DB, saleID); err != nil {
+		return models.SaleDetails{}, err
+	}
+	options, blocked, err := paymentChangeOptions(ctx, s.DB, s.Now(), sale, payments)
+	if err != nil {
+		return models.SaleDetails{}, err
+	}
+	out.PaymentChangeBlocked = blocked
+	if options != nil {
+		out.PaymentChangeMethods = options
+	}
 	if sale.CustomerID != nil {
 		c, err := s.customers.GetByID(ctx, s.DB, *sale.CustomerID)
 		if err != nil {

@@ -156,6 +156,54 @@ func (c *ControlID) EnrollFace(ctx context.Context, userID int64) error {
 	return err
 }
 
+// SetUserImage cadastra o rosto a partir de uma foto (JPEG ou PNG), em vez da
+// câmera do aparelho. match=1: o aparelho recusa se o rosto já for de outra
+// pessoa cadastrada. Se a foto não servir (rosto pequeno, torto, borrado), ele
+// devolve o motivo.
+func (c *ControlID) SetUserImage(ctx context.Context, userID int64, img []byte) error {
+	return c.withSession(ctx, func(session string) error {
+		url := fmt.Sprintf("http://%s/user_set_image.fcgi?user_id=%d&match=1&timestamp=%d&session=%s", c.Host, userID, time.Now().Unix(), session)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(img))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/octet-stream")
+		res, err := c.http.Do(req)
+		if err != nil {
+			return fmt.Errorf("o iDFace em %s não respondeu (confira o IP e a rede)", c.Host)
+		}
+		defer res.Body.Close()
+		data, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+		if res.StatusCode == http.StatusUnauthorized {
+			return errSession
+		}
+		var r struct {
+			Success *bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+			} `json:"errors"`
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(data, &r)
+		if res.StatusCode != http.StatusOK || (r.Success != nil && !*r.Success) {
+			msgs := []string{}
+			for _, e := range r.Errors {
+				if e.Message != "" {
+					msgs = append(msgs, e.Message)
+				}
+			}
+			if r.Error != "" {
+				msgs = append(msgs, r.Error)
+			}
+			if len(msgs) == 0 {
+				msgs = append(msgs, strings.TrimSpace(string(data)))
+			}
+			return fmt.Errorf("a foto não foi aceita pelo aparelho: %s", strings.Join(msgs, "; "))
+		}
+		return nil
+	})
+}
+
 // UserImage devolve a foto (JPEG) que o aparelho guardou no cadastro do rosto;
 // nil quando a pessoa não tem foto lá.
 func (c *ControlID) UserImage(ctx context.Context, userID int64) ([]byte, error) {

@@ -2,6 +2,8 @@
 <script setup lang="ts">
 // Ícones de traço 24×24 (desenho no estilo Lucide). O botão leva title/aria-label.
 const paths: Record<string, string[]> = {
+  // três pontos (mais ações)
+  mais: ['M4 12a1 1 0 1 0 2 0a1 1 0 1 0-2 0', 'M11 12a1 1 0 1 0 2 0a1 1 0 1 0-2 0', 'M18 12a1 1 0 1 0 2 0a1 1 0 1 0-2 0'],
   // lápis
   edit: ['M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z', 'm15 5 4 4'],
   // caixa com +

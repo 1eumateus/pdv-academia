@@ -5,6 +5,7 @@ package device
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -21,6 +22,10 @@ type Decision struct {
 	Name    string
 	Message string // aparece na tela do iDFace
 }
+
+// OnNotice recebe os avisos do aparelho que não são reconhecimento de rosto
+// (ex.: giro da catraca, porta, SecBox). Serve para diagnóstico: só registra.
+var OnNotice func(path, body string)
 
 // Decider decide o acesso do usuário do aparelho (deviceUserID).
 type Decider func(ctx context.Context, deviceUserID int64) Decision
@@ -52,12 +57,21 @@ func (s *Server) handler(decide Decider, allowActions func() []map[string]string
 				res["event"] = 6
 			}
 		}
+		// Diagnóstico do giro: a passagem entra no log para comparar com os avisos seguintes.
+		if fn := OnNotice; fn != nil {
+			fn("rosto reconhecido", fmt.Sprintf("usuario=%d portal=%d liberado=%v", userID, portal, res["event"] == 7))
+		}
 		writeJSON(w, map[string]any{"result": res})
 	})
-	// device_is_alive.fcgi e demais avisos do aparelho: só confirma.
+	// device_is_alive.fcgi e demais avisos do aparelho: só confirma. Os avisos
+	// (menos o "estou vivo", que chega o tempo todo) vão para OnNotice.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		s.lastSeen.Store(time.Now().Unix())
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10))
 		io.Copy(io.Discard, io.LimitReader(r.Body, 8<<20))
+		if fn := OnNotice; fn != nil && !strings.Contains(r.URL.Path, "device_is_alive") {
+			fn(r.Method+" "+r.URL.RequestURI(), string(body))
+		}
 		writeJSON(w, map[string]any{})
 	})
 	return mux
